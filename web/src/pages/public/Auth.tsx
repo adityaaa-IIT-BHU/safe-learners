@@ -117,17 +117,21 @@ export function Signup({ role }: { role: Extract<Role, 'learner' | 'instructor'>
     try {
       const cred = await createUserWithEmailAndPassword(auth, values.email, values.password);
       await updateProfile(cred.user, { displayName: `${values.firstName} ${values.surname}` });
+      // Public profile: instructors' contact details stay private (their profile is public).
       await setDoc(doc(db, 'users', cred.user.uid), {
         role,
         firstName: values.firstName,
         surname: values.surname,
-        email: values.email.toLowerCase(),
-        mobile: values.mobile,
         timezone: DEFAULT_TIMEZONE,
         createdAt: serverTimestamp(),
-        ...(role === 'learner' && values.dob ? { dob: values.dob } : {}),
+        ...(role === 'learner' ? { email: values.email.toLowerCase(), mobile: values.mobile } : {}),
         ...(role === 'instructor' ? { verificationStatus: 'not_submitted', transmission: values.transmission ?? 'Auto' } : {}),
       });
+      await setDoc(doc(db, 'users', cred.user.uid, 'private', 'profile'), {
+        email: values.email.toLowerCase(),
+        mobile: values.mobile,
+        ...(values.dob ? { dob: values.dob } : {}),
+      }, { merge: true });
       await onboard(role === 'learner' ? values.referralCode || undefined : undefined);
       toast.success(role === 'instructor' ? 'Account created. Next, set up your profile.' : 'Welcome to Safe Learners!');
       // `creating` stays true so the redirect effect above doesn't override this navigation.

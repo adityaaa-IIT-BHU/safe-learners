@@ -95,6 +95,7 @@ export interface UserProfile {
   calendarSettings?: CalendarSettings;
   documentsPending?: boolean;
   privateInstructorIds?: string[];
+  bookedInstructorIds?: string[];
   vehicle?: VehicleDetails;
   verificationStatus?: VerificationStatus;
   verification?: VerificationDetails;
@@ -296,6 +297,7 @@ export interface Booking {
   status: BookingStatus;
   instructorId: string;
   instructorName?: string;
+  instructorMobile?: string;
   learnerId?: string;
   learnerName?: string;
   lessonType?: LessonType;
@@ -661,6 +663,7 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     status: mapLegacyStatus(raw.status),
     instructorId: raw.instructorId,
     instructorName: raw.instructorName,
+    instructorMobile: raw.instructorMobile,
     learnerId: raw.learnerId,
     learnerName: raw.learnerName,
     lessonType: kind === 'lesson' ? (raw.lessonType in LESSON_TYPES ? raw.lessonType : legacyLessonType(raw.lessonType)) : undefined,
@@ -722,6 +725,20 @@ export function normaliseExpiry(value: unknown): string | null {
 export function isExpired(value: unknown, timeZone: string = DEFAULT_TIMEZONE, now: Date = new Date()): boolean {
   const iso = normaliseExpiry(value);
   return !!iso && iso < dayKey(now, timeZone);
+}
+
+/**
+ * Verification documents uploaded on the previous website, from the old flat fields
+ * (now kept in users/{uid}/private/profile.legacy).
+ */
+export function legacyVerificationDocs(r: Record<string, any> | undefined | null): Partial<Record<VerificationStepKey, VerificationDocument>> {
+  const out: Partial<Record<VerificationStepKey, VerificationDocument>> = {};
+  if (!r) return out;
+  if (r.driverLicenseUrl) out.driverLicence = { url: r.driverLicenseUrl, number: r.licenseNumber, expiry: r.licenseExpiry };
+  if (r.instructorLicenseUrl) out.instructorLicence = { url: r.instructorLicenseUrl, number: r.instructorLicenseNumber, expiry: r.instructorLicenseExpiry };
+  if (r.wwcCheckUrl) out.wwc = { url: r.wwcCheckUrl, number: r.wwcNumber, expiry: r.wwcExpiry };
+  if (r.vehicleRegoUrl) out.vehicleRego = { url: r.vehicleRegoUrl, number: r.plateNumber, expiry: r.regoExpiry };
+  return out;
 }
 
 /** Vehicle details from new or legacy (flat) user fields. */

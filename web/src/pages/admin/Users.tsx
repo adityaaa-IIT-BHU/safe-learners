@@ -8,7 +8,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { BookingRow } from '@/components/booking';
 import { Avatar, Badge, Button, ButtonLink, Card, CardHeader, EmptyState, Input, Modal, PageHeader, PageLoader, Select, Stat, formatMoney } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
-import { useBookings, useDoc, useUser } from '@/lib/data';
+import { useBookings, useDoc, usePrivateProfile, useUser } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { homePath } from '@/lib/routes';
 import { useAllUsers } from './Overview';
@@ -68,6 +68,7 @@ export function AdminUserDetail() {
   const { viewAs } = useAuth();
   const navigate = useNavigate();
   const { data: user, loading } = useUser(id);
+  const { data: priv } = usePrivateProfile(id);
   const { data: asLearner } = useBookings('learnerId', user?.role === 'learner' ? id : null);
   const { data: asInstructor } = useBookings('instructorId', user?.role === 'instructor' ? id : null);
   const [walletOpen, setWalletOpen] = useState(false);
@@ -85,7 +86,7 @@ export function AdminUserDetail() {
       <PageHeader
         back={<Link to="/admin/users" className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-500 hover:text-ink-900 dark:hover:text-white"><ArrowLeft className="size-4" />Users</Link>}
         title={<span className="flex items-center gap-3"><Avatar name={fullName(user)} src={user.photoUrl} size={48} />{fullName(user)}</span>}
-        subtitle={`${user.role} · ${user.email ?? user.inviteEmail ?? 'no email'}${user.mobile ? ` · ${user.mobile}` : ''}`}
+        subtitle={`${user.role} · ${priv?.email ?? user.email ?? user.inviteEmail ?? 'no email'}${(priv?.mobile ?? user.mobile) ? ` · ${priv?.mobile ?? user.mobile}` : ''}${priv?.dob ? ` · born ${priv.dob}` : ''}`}
         actions={<>
           {user.role !== 'admin' && user.status !== 'invited' && (
             <Button variant="secondary" icon={<Eye className="size-4" />} onClick={() => { viewAs(user.id); navigate(homePath(user.role)); }}>View as {user.firstName}</Button>

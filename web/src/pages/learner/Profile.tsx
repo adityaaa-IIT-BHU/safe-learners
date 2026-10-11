@@ -1,16 +1,18 @@
 import { sendPasswordResetEmail } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { KeyRound } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { Button, Card, CardHeader, Input, PageHeader } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
+import { usePrivateProfile } from '@/lib/data';
 import { auth, db } from '@/lib/firebase';
 
 export function LearnerProfile() {
   const me = useProfile();
   const { user, readOnly } = useAuth();
+  const { data: priv } = usePrivateProfile(me.id);
   const [form, setForm] = useState({
     firstName: me.firstName ?? '',
     surname: me.surname ?? '',
@@ -18,6 +20,8 @@ export function LearnerProfile() {
     dob: me.dob ?? '',
     homeSuburb: me.homeSuburb ?? '',
   });
+  // Date of birth is private (only you and Safe Learners can see it).
+  useEffect(() => { if (priv?.dob) setForm(f => ({ ...f, dob: f.dob || priv.dob })); }, [priv?.dob]);
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -34,7 +38,9 @@ export function LearnerProfile() {
               if (!form.firstName.trim()) return toast.error('First name is required.');
               setSaving(true);
               try {
-                await updateDoc(doc(db, 'users', me.id), Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim()])));
+                const { dob, ...publicFields } = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim()]));
+                await updateDoc(doc(db, 'users', me.id), publicFields);
+                await setDoc(doc(db, 'users', me.id, 'private', 'profile'), { dob, mobile: publicFields.mobile }, { merge: true });
                 toast.success('Profile saved');
               } catch (err) {
                 toast.error(errorMessage(err));

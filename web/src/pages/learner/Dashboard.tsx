@@ -171,7 +171,7 @@ function MyInstructorCard({ instructor }: { instructor: ReturnType<typeof useUse
           <Avatar name={fullName(instructor)} src={instructor.photoUrl} size={48} />
           <div>
             <p className="font-bold">{fullName(instructor)}</p>
-            <p className="text-sm text-ink-500">{formatMoney(pricingFor(instructor, me).lesson)}/hr{instructor.mobile ? ` · ${instructor.mobile}` : ''}</p>
+            <p className="text-sm text-ink-500">{formatMoney(pricingFor(instructor, me).lesson)}/hr</p>
           </div>
         </Link>
         <div className="flex items-center gap-3 rounded-xl bg-ink-50 p-3 dark:bg-ink-800/60">

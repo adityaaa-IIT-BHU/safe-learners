@@ -87,9 +87,9 @@ export function LearnerBookingDetail() {
                 <p className="text-sm text-ink-500">{[instructor?.vehicle?.make, instructor?.vehicle?.model].filter(Boolean).join(' ') || 'Instructor'}</p>
               </div>
             </Link>
-            {instructor?.mobile && (
-              <a href={`tel:${instructor.mobile.replace(/\s/g, '')}`} className="flex items-center gap-2 rounded-xl bg-ink-50 px-4 py-3 text-sm font-semibold hover:bg-ink-100 dark:bg-ink-800 dark:hover:bg-ink-700">
-                <Phone className="size-4" />{instructor.mobile}
+            {booking.instructorMobile && (
+              <a href={`tel:${booking.instructorMobile.replace(/\s/g, '')}`} className="flex items-center gap-2 rounded-xl bg-ink-50 px-4 py-3 text-sm font-semibold hover:bg-ink-100 dark:bg-ink-800 dark:hover:bg-ink-700">
+                <Phone className="size-4" />{booking.instructorMobile}
               </a>
             )}
           </div>

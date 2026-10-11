@@ -5,9 +5,9 @@ import { toast } from 'sonner';
 import {
   VERIFICATION_STEPS,
   isExpired,
+  legacyVerificationDocs,
   normaliseExpiry,
   type DocumentReview,
-  type UserProfile,
   type VerificationDocument,
   type VerificationStepKey,
 } from '@shared/domain';
@@ -31,16 +31,6 @@ const formatExpiry = (v?: string) => {
   return iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : v ?? '—';
 };
 
-/** Documents uploaded through the previous website live in old fields on the user record. */
-function legacyDocs(me: UserProfile): Docs {
-  const r = me as unknown as Record<string, string | undefined>;
-  const out: Docs = {};
-  if (r.driverLicenseUrl) out.driverLicence = { url: r.driverLicenseUrl, number: r.licenseNumber, expiry: r.licenseExpiry };
-  if (r.instructorLicenseUrl) out.instructorLicence = { url: r.instructorLicenseUrl, number: r.instructorLicenseNumber, expiry: r.instructorLicenseExpiry };
-  if (r.wwcCheckUrl) out.wwc = { url: r.wwcCheckUrl, number: r.wwcNumber, expiry: r.wwcExpiry };
-  if (r.vehicleRegoUrl) out.vehicleRego = { url: r.vehicleRegoUrl, number: r.plateNumber, expiry: r.regoExpiry };
-  return out;
-}
 
 export function Verification() {
   const me = useProfile();
@@ -50,10 +40,12 @@ export function Verification() {
     return {
       docs: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, { ...x, submittedAt: toDate(x.submittedAt) }])) as Docs,
       history: ((d.verificationHistory ?? []) as Record<string, unknown>[]).map(h => ({ ...h, submittedAt: toDate(h.submittedAt), replacedAt: toDate(h.replacedAt) })) as HistoryEntry[],
+      // Documents uploaded on the previous website.
+      legacy: legacyVerificationDocs(d.legacy as Record<string, unknown> | undefined),
     };
   });
   const docs = priv?.docs ?? {};
-  const legacy = legacyDocs(me);
+  const legacy = priv?.legacy ?? {};
   const status = me.verificationStatus ?? 'not_submitted';
   const current = (key: VerificationStepKey) => docs[key] ?? legacy[key];
   const complete = VERIFICATION_STEPS.filter(s => current(s.key)?.url && current(s.key)?.expiry && !isExpired(current(s.key)?.expiry)).length;
@@ -146,7 +138,10 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
   history: HistoryEntry[];
   readOnly: boolean;
 }) {
-  const [editing, setEditing] = useState(!value?.url);
+  // Until the instructor opens or closes the form, show it only when there's no document yet
+  // (documents load a moment after the page, so this can't be fixed at first render).
+  const [editingChoice, setEditing] = useState<boolean | null>(null);
+  const editing = editingChoice ?? !value?.url;
   const [showHistory, setShowHistory] = useState(false);
   const [front, setFront] = useState<{ url: string; path: string; name: string } | null>(null);
   const [back, setBack] = useState<{ url: string; path: string; name: string } | null>(null);

@@ -6,6 +6,7 @@ import {
   VERIFICATION_STEPS,
   fullName,
   isExpired,
+  legacyVerificationDocs,
   normaliseBooking,
   type UserProfile,
 } from '../../shared/domain';
@@ -17,7 +18,7 @@ import {
   bookingFields,
   db,
   fail,
-  isAdminEmail,
+  isAdminAccount,
   notify,
   notifyAdmins,
   requireAdmin,
@@ -43,8 +44,8 @@ export const onboardUser = onCall(opts, async req => {
   const email = (req.auth!.token.email || '').toLowerCase();
   let claimsChanged = false;
 
-  // Admin access comes from the ADMIN_EMAILS list.
-  const shouldBeAdmin = isAdminEmail(email);
+  // Admin access: ADMIN_UIDS, or a *verified* email on ADMIN_EMAILS.
+  const shouldBeAdmin = isAdminAccount(uid, req.auth!.token);
   if (shouldBeAdmin !== (req.auth!.token.admin === true)) {
     await auth.setCustomUserClaims(uid, shouldBeAdmin ? { admin: true } : {});
     claimsChanged = true;
@@ -221,8 +222,9 @@ export const submitVerification = onCall(opts, async req => {
   const uid = requireAuth(req);
   const instructor = await requireUser(uid, 'instructor');
   const priv = (await db.doc(`users/${uid}/private/profile`).get()).data() || {};
-  const docs = priv.verification || {};
-  const missing = VERIFICATION_STEPS.filter(s => !docs[s.key]?.url || !docs[s.key]?.number || !docs[s.key]?.expiry);
+  // Documents uploaded on the previous website count too, unless replaced by a new upload.
+  const docs: Record<string, any> = { ...legacyVerificationDocs(priv.legacy), ...(priv.verification || {}) };
+  const missing = VERIFICATION_STEPS.filter(s => !docs[s.key]?.url || !docs[s.key]?.expiry);
   if (missing.length) fail(`Please complete: ${missing.map(m => m.label).join(', ')}.`);
   const expired = VERIFICATION_STEPS.filter(s => isExpired(docs[s.key]?.expiry));
   if (expired.length) fail(`These documents have expired: ${expired.map(m => m.label).join(', ')}. Please update them.`);

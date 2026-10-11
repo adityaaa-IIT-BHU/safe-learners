@@ -1,3 +1,4 @@
+import type { Transaction } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import {
   FREE_CANCELLATION_HOURS,
@@ -101,6 +102,12 @@ function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeId
   };
 }
 
+/** The instructor's mobile (kept privately) to give booked learners. Read inside the transaction. */
+async function instructorContact(tx: Transaction, instructor: UserProfile): Promise<string | undefined> {
+  const priv = (await tx.get(db.doc(`users/${instructor.id}/private/profile`))).data();
+  return (priv?.mobile as string | undefined) || instructor.mobile || undefined;
+}
+
 function assertOffered(instructor: UserProfile, lessonType: LessonType) {
   if (!calendarOf(instructor).lessonTypes.includes(lessonType)) {
     fail(`${instructor.firstName} doesn’t offer ${LESSON_TYPES[lessonType].label.toLowerCase()}s.`);
@@ -171,6 +178,7 @@ export const createBooking = onCall(opts, async req => {
     const instructor = userFrom(await tx.get(db.doc(`users/${instructorId}`)));
     assertBookableInstructor(instructor);
     assertOffered(instructor, lessonType);
+    const instructorMobile = await instructorContact(tx, instructor);
     const existing = await instructorBookings(tx, instructorId);
     const old = rescheduleOf ? bookingFrom(await tx.get(db.doc(`bookings/${rescheduleOf}`))) : null;
     if (rescheduleOf) {
@@ -211,6 +219,7 @@ export const createBooking = onCall(opts, async req => {
       status: 'confirmed',
       instructorId,
       instructorName: instructor.firstName,
+      instructorMobile,
       learnerId,
       learnerName: fullName(learner),
       lessonType,
@@ -232,7 +241,10 @@ export const createBooking = onCall(opts, async req => {
       createdAt: FieldValue.serverTimestamp(),
       history: [historyEntry(old ? `Rescheduled from ${old.ref ?? 'a previous booking'}` : 'Booked', 'learner', learner.firstName)],
     });
-    if (!learner.instructorId) tx.update(db.doc(`users/${learnerId}`), { instructorId });
+    tx.update(db.doc(`users/${learnerId}`), {
+      bookedInstructorIds: FieldValue.arrayUnion(instructorId),
+      ...(learner.instructorId ? {} : { instructorId }),
+    });
     return { booking, old, learnerName: learner.firstName };
   });
 
@@ -266,6 +278,7 @@ export const proposeBooking = onCall(opts, async req => {
   const { booking, old, instructorName } = await db.runTransaction(async tx => {
     const instructor = userFrom(await tx.get(db.doc(`users/${instructorId}`)));
     assertBookableInstructor(instructor);
+    const instructorMobile = await instructorContact(tx, instructor);
     const learner = userFrom(await tx.get(db.doc(`users/${learnerId}`)));
     if (!learner || learner.role !== 'learner') fail('Learner not found.', 'not-found');
     const existing = await instructorBookings(tx, instructorId);
@@ -301,6 +314,7 @@ export const proposeBooking = onCall(opts, async req => {
       status: 'proposed',
       instructorId,
       instructorName: instructor.firstName,
+      instructorMobile,
       learnerId,
       learnerName: fullName(learner),
       lessonType,
@@ -321,7 +335,10 @@ export const proposeBooking = onCall(opts, async req => {
       createdAt: FieldValue.serverTimestamp(),
       history: [historyEntry(old ? `Proposed as a new time for ${old.ref ?? 'a previous booking'}` : 'Proposed', 'instructor', instructor.firstName)],
     });
-    if (!learner.instructorId) tx.update(db.doc(`users/${learnerId}`), { instructorId });
+    tx.update(db.doc(`users/${learnerId}`), {
+      bookedInstructorIds: FieldValue.arrayUnion(instructorId),
+      ...(learner.instructorId ? {} : { instructorId }),
+    });
     return { booking, old, instructorName: instructor.firstName };
   });
 

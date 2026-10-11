@@ -19,6 +19,11 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
 
+    // Personal details that only belong in users/{uid}/private/profile.
+    function privateFields() {
+      return ['dob', 'gender'];
+    }
+
     // Fields users may edit on their own profile.
     function editableProfileFields() {
       return [
@@ -30,19 +35,31 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      // Instructor profiles are public (browse & book). Learners are visible to themselves,
-      // instructors (to propose lessons) and admins.
+      // Instructor profiles are public (browse & book) and hold no contact or identity details —
+      // those live in users/{uid}/private. A learner is visible to themselves, admins, and only the
+      // instructors linked to them (assigned, invited, or with a booking together).
       allow get, list: if resource.data.role == 'instructor'
         || isSelf(uid)
         || isAdmin()
-        || (resource.data.role == 'learner' && isInstructor());
+        || (resource.data.role == 'learner' && signedIn() && (
+          resource.data.get('instructorId', '') == request.auth.uid
+          || resource.data.get('invitedBy', '') == request.auth.uid
+          || request.auth.uid in resource.data.get('privateInstructorIds', [])
+          || request.auth.uid in resource.data.get('bookedInstructorIds', [])
+        ));
 
       allow create: if isSelf(uid)
         && request.resource.data.role in ['learner', 'instructor']
         && request.resource.data.keys().hasOnly(editableProfileFields().concat(['role', 'email', 'verificationStatus', 'createdAt']))
+        && !request.resource.data.keys().hasAny(privateFields())
+        && (request.resource.data.role == 'learner' || !request.resource.data.keys().hasAny(['email', 'mobile']))
         && (!('verificationStatus' in request.resource.data) || request.resource.data.verificationStatus == 'not_submitted');
 
-      allow update: if isSelf(uid) && changedOnly(editableProfileFields());
+      allow update: if isSelf(uid)
+        && changedOnly(editableProfileFields())
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(privateFields())
+        // Instructors' contact details are private (public profile).
+        && (resource.data.role == 'learner' || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['mobile']));
 
       // Verification documents and other private details.
       match /private/{doc} {

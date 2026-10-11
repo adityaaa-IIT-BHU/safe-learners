@@ -20,10 +20,11 @@ export { FieldValue, Timestamp, logger };
 
 export const REGION = 'australia-southeast1';
 export const APP_URL = process.env.APP_URL || 'https://australiadrivingproj.web.app';
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'aditya@gmail.com')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
+// Admins: accounts listed by UID, or emails on the list that have been verified (see isAdminAccount).
+// No built-in fallback, so a missing config can never hand admin to whoever registers an address first.
+const listEnv = (name: string) => (process.env[name] || '').split(',').map(e => e.trim()).filter(Boolean);
+const ADMIN_EMAILS = listEnv('ADMIN_EMAILS').map(e => e.toLowerCase());
+const ADMIN_UIDS = listEnv('ADMIN_UIDS');
 
 export function toDate(v: any): Date | undefined {
   if (!v) return undefined;
@@ -49,8 +50,14 @@ export function userFrom(snap: DocumentSnapshot): UserProfile | null {
 
 // ---------- Auth guards ----------
 
-export function isAdminEmail(email: string | undefined | null): boolean {
-  return !!email && ADMIN_EMAILS.includes(email.toLowerCase());
+/** Whether this signed-in account may be an admin: listed by UID, or a verified email on the list. */
+export function isAdminAccount(uid: string, token: { email?: string; email_verified?: boolean }): boolean {
+  if (ADMIN_UIDS.includes(uid)) return true;
+  return !!token.email && token.email_verified === true && ADMIN_EMAILS.includes(token.email.toLowerCase());
+}
+
+export function adminEmails(): string[] {
+  return ADMIN_EMAILS;
 }
 
 export function requireAuth(req: CallableRequest): string {
@@ -60,7 +67,8 @@ export function requireAuth(req: CallableRequest): string {
 
 export function requireAdmin(req: CallableRequest): string {
   const uid = requireAuth(req);
-  if (req.auth!.token.admin !== true && !isAdminEmail(req.auth!.token.email)) {
+  // Only the custom claim counts; it's granted by onboardUser after the checks in isAdminAccount.
+  if (req.auth!.token.admin !== true) {
     throw new HttpsError('permission-denied', 'Admins only.');
   }
   return uid;
@@ -91,7 +99,7 @@ export function bookingFields(b: Booking): Record<string, unknown> {
     timezone: b.timezone,
   };
   const optional: (keyof Booking)[] = [
-    'ref', 'instructorName', 'learnerId', 'learnerName', 'lessonType', 'title', 'transmission', 'pickupLocation',
+    'ref', 'instructorName', 'instructorMobile', 'learnerId', 'learnerName', 'lessonType', 'title', 'transmission', 'pickupLocation',
     'dropoffLocation', 'testLocation', 'notes', 'price', 'paymentStatus', 'proposedBy', 'cancelledBy',
     'cancellationReason', 'rescheduledFrom', 'rescheduledTo', 'reviewed',
   ];
@@ -177,7 +185,7 @@ export async function notify(userId: string | undefined, n: NotificationInput): 
 
 export async function notifyAdmins(n: NotificationInput): Promise<void> {
   await notify('admin', { ...n, email: false });
-  for (const email of ADMIN_EMAILS) await sendEmail(email, `[Admin] ${n.title}`, `${n.body}\n\n${APP_URL}${n.link ?? ''}`);
+  for (const email of adminEmails()) await sendEmail(email, `[Admin] ${n.title}`, `${n.body}\n\n${APP_URL}${n.link ?? ''}`);
 }
 
 async function emailFor(userId: string): Promise<string | undefined> {

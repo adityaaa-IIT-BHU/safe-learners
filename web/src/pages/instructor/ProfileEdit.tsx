@@ -1,12 +1,13 @@
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Camera, CarFront, ExternalLink } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { fullName, type Transmission, type VehicleDetails } from '@shared/domain';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { Button, Card, CardHeader, Input, PageHeader, Select, Textarea } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
+import { usePrivateProfile } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { uploadFile } from '@/lib/upload';
 
@@ -23,6 +24,8 @@ export function ProfileEdit() {
     transmission: (me.transmission ?? 'Auto') as Transmission,
   });
   const [vehicle, setVehicle] = useState<VehicleDetails>(() => ({ ...me.vehicle, ancap: me.vehicle?.ancap ?? '5 Star', dualControls: me.vehicle?.dualControls ?? true }));
+  const { data: priv } = usePrivateProfile(me.id);
+  useEffect(() => { if (priv?.mobile) setForm(f => ({ ...f, mobile: f.mobile || priv.mobile })); }, [priv?.mobile]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState<'photo' | 'vehicle' | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
@@ -55,8 +58,11 @@ export function ProfileEdit() {
     setSaving(true);
     try {
       const cleanVehicle = Object.fromEntries(Object.entries(vehicle).filter(([, v]) => v !== '' && v !== undefined));
+      const { mobile, ...publicFields } = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
+      // Your mobile is private: it's only given to learners in their booking details.
+      await setDoc(doc(db, 'users', me.id, 'private', 'profile'), { mobile }, { merge: true });
       await updateDoc(doc(db, 'users', me.id), {
-        ...Object.fromEntries(Object.entries(form).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])),
+        ...publicFields,
         vehicle: { ...cleanVehicle, dualControls: vehicle.dualControls === true || (vehicle.dualControls as unknown) === 'true' },
       });
       toast.success('Profile saved');
@@ -103,7 +109,7 @@ export function ProfileEdit() {
             <div className="grid gap-4 sm:grid-cols-2">
               <Input label="First name" value={form.firstName} onChange={set('firstName')} />
               <Input label="Surname" value={form.surname} onChange={set('surname')} />
-              <Input label="Mobile" type="tel" value={form.mobile} onChange={set('mobile')} hint="Shown to your booked learners." />
+              <Input label="Mobile" type="tel" value={form.mobile} onChange={set('mobile')} hint="Private — only shown to learners in their booking details." />
               <Input label="Teaching since" type="number" min={1970} max={new Date().getFullYear()} placeholder="e.g. 2015" value={form.startYear} onChange={set('startYear')} />
               <Select label="Transmission" value={form.transmission} onChange={set('transmission')}>
                 <option value="Auto">Automatic</option>

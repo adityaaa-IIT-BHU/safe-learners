@@ -2,7 +2,7 @@ import { doc } from 'firebase/firestore';
 import { BadgeCheck, ExternalLink, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { VERIFICATION_STEPS, fullName, isExpired, normaliseExpiry, type UserProfile, type VerificationDocument, type VerificationStepKey } from '@shared/domain';
+import { VERIFICATION_STEPS, fullName, isExpired, legacyVerificationDocs, normaliseExpiry, type UserProfile, type VerificationDocument, type VerificationStepKey } from '@shared/domain';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, Tabs, Textarea } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useDoc } from '@/lib/data';
@@ -40,19 +40,13 @@ export function AdminVerifications() {
 }
 
 function InstructorReview({ instructor }: { instructor: UserProfile }) {
-  const { data: docs } = useDoc(doc(db, 'users', instructor.id, 'private', 'profile'), (_, d) => (d.verification ?? {}) as Record<string, VerificationDocument>);
+  const { data: priv } = useDoc(doc(db, 'users', instructor.id, 'private', 'profile'), (_, d) => d as Record<string, any>);
+  const docs = (priv?.verification ?? {}) as Record<string, VerificationDocument>;
+  const legacy = legacyVerificationDocs(priv?.legacy);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-
-  // Legacy instructors uploaded through the old site: URLs live on the main user doc.
-  const legacy = instructor as unknown as Record<string, string | undefined>;
-  const docFor = (key: string): VerificationDocument | undefined => docs?.[key] ?? {
-    driverLicence: legacy.driverLicenseUrl ? { url: legacy.driverLicenseUrl, number: legacy.licenseNumber, expiry: legacy.licenseExpiry } : undefined,
-    instructorLicence: legacy.instructorLicenseUrl ? { url: legacy.instructorLicenseUrl, number: legacy.instructorLicenseNumber, expiry: legacy.instructorLicenseExpiry } : undefined,
-    wwc: legacy.wwcCheckUrl ? { url: legacy.wwcCheckUrl, number: legacy.wwcNumber, expiry: legacy.wwcExpiry } : undefined,
-    vehicleRego: legacy.vehicleRegoUrl ? { url: legacy.vehicleRegoUrl, number: legacy.plateNumber, expiry: legacy.regoExpiry } : undefined,
-  }[key];
+  const docFor = (key: string): VerificationDocument | undefined => docs[key] ?? legacy[key as VerificationStepKey];
 
   const decide = async (approve: boolean) => {
     setBusy(true);
@@ -71,7 +65,7 @@ function InstructorReview({ instructor }: { instructor: UserProfile }) {
     <Card>
       <CardHeader
         title={<span className="flex items-center gap-3"><Avatar name={fullName(instructor)} src={instructor.photoUrl} size={36} />{fullName(instructor)}</span>}
-        subtitle={[instructor.email, instructor.mobile].filter(Boolean).join(' · ')}
+        subtitle={[priv?.email ?? instructor.email, priv?.mobile ?? instructor.mobile].filter(Boolean).join(' · ')}
         action={instructor.verificationStatus !== 'verified' ? (
           <div className="flex gap-2">
             <Button size="sm" variant="secondary" onClick={() => setRejectOpen(true)}>Request changes</Button>

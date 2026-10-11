@@ -161,6 +161,11 @@ export function useBookings(field: 'learnerId' | 'instructorId', uid: string | n
   return { ...live, data };
 }
 
+/** users/{uid}/private/profile: contact, date of birth, documents (readable by the user and admins). */
+export function usePrivateProfile(uid: string | null | undefined): Live<Record<string, any> | null> {
+  return useDoc(uid ? doc(db, 'users', uid, 'private', 'profile') : null, (_, d) => d as Record<string, any>);
+}
+
 export function useBooking(id: string | undefined): Live<Booking | null> {
   return useDoc(id ? doc(db, 'bookings', id) : null, mapBooking);
 }
