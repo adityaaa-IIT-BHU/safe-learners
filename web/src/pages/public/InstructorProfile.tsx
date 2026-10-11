@@ -140,6 +140,15 @@ export function InstructorProfile({ embedded }: { embedded?: boolean }) {
             </div>
           </Card>
 
+          {!!i.testLocations?.length && (
+            <Card>
+              <CardHeader title="Driving test centres" />
+              <ul className="space-y-1.5 p-5 text-sm">
+                {i.testLocations.map(l => <li key={l.name}><strong>{l.name}</strong>{l.address && <span className="block text-xs text-ink-500">{l.address}</span>}</li>)}
+              </ul>
+            </Card>
+          )}
+
           <Card>
             <CardHeader title="Usual hours" />
             <ul className="space-y-1.5 p-5 text-sm">

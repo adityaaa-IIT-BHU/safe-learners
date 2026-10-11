@@ -45,7 +45,7 @@ export interface CalendarSettings {
   maxAdvanceDays?: number;
   smartScheduling?: boolean; // avoid leaving unbookable gaps
   smartGapMinutes?: number; // gaps shorter than this are avoided
-  defaultView?: 'day' | 'week';
+  defaultView?: 'day' | 'week' | 'month';
 }
 
 export const DEFAULT_PRICING: Pricing = { lesson: 75, testPackage: 225 };
@@ -96,6 +96,7 @@ export interface UserProfile {
   documentsPending?: boolean;
   privateInstructorIds?: string[];
   bookedInstructorIds?: string[];
+  testLocations?: TestLocation[];
   vehicle?: VehicleDetails;
   verificationStatus?: VerificationStatus;
   verification?: VerificationDetails;
@@ -196,17 +197,18 @@ export function pricingFor(
 
 // ---------- Lessons ----------
 
-export type LessonType = 'lesson-1h' | 'lesson-1.5h' | 'lesson-2h' | 'lesson-3h' | 'test-package';
+export type LessonType = 'lesson-1h' | 'lesson-1.5h' | 'lesson-2h' | 'lesson-3h' | 'lesson-4h' | 'test-package';
 
 export const LESSON_TYPES: Record<LessonType, { label: string; short: string; minutes: number }> = {
   'lesson-1h': { label: '1 Hour Driving Lesson', short: '1 hr lesson', minutes: 60 },
   'lesson-1.5h': { label: '1.5 Hour Driving Lesson', short: '1.5 hr lesson', minutes: 90 },
   'lesson-2h': { label: '2 Hour Driving Lesson', short: '2 hr lesson', minutes: 120 },
   'lesson-3h': { label: '3 Hour Driving Lesson', short: '3 hr lesson', minutes: 180 },
+  'lesson-4h': { label: '4 Hour Driving Lesson', short: '4 hr lesson', minutes: 240 },
   'test-package': { label: 'Driving Test Package', short: 'Test package', minutes: 150 },
 };
 
-export const LESSON_TYPE_ORDER: LessonType[] = ['lesson-1h', 'lesson-1.5h', 'lesson-2h', 'lesson-3h', 'test-package'];
+export const LESSON_TYPE_ORDER: LessonType[] = ['lesson-1h', 'lesson-1.5h', 'lesson-2h', 'lesson-3h', 'lesson-4h', 'test-package'];
 
 /** Every instructor offers these; the rest are optional in calendar settings. */
 export const REQUIRED_LESSON_TYPES: LessonType[] = ['lesson-1h', 'lesson-2h'];
@@ -319,6 +321,9 @@ export interface Booking {
   rescheduledTo?: string;
   reviewed?: boolean;
   instructorNotes?: string;
+  /** Personal events: whether travel buffer applies around them (default yes). */
+  applyBuffer?: boolean;
+  repeatGroupId?: string;
   createdAt?: Date;
   history?: BookingHistoryEntry[];
   legacy?: boolean;
@@ -436,6 +441,15 @@ export interface Slot {
 export interface BusyInterval {
   start: Date;
   end: Date;
+  /** Travel buffer around this block; defaults to the instructor's setting (0 for events without a buffer). */
+  bufferMinutes?: number;
+}
+
+export interface TestLocation {
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
 }
 
 interface Span {
@@ -517,8 +531,8 @@ export function openSlotsForDay(opts: {
     ...extraOpen.map(x => ({ start: Math.max(x.start.getTime(), dayStart), end: Math.min(x.end.getTime(), dayEnd) })),
   ]);
   const free = subtractSpans(open, busy.map(b => ({
-    start: b.start.getTime() - bufferMinutes * MIN,
-    end: b.end.getTime() + bufferMinutes * MIN,
+    start: b.start.getTime() - (b.bufferMinutes ?? bufferMinutes) * MIN,
+    end: b.end.getTime() + (b.bufferMinutes ?? bufferMinutes) * MIN,
   })));
 
   const duration = durationMinutes * MIN;
@@ -620,6 +634,7 @@ export function legacyLessonType(value: unknown): LessonType {
   const v = String(value || '').toLowerCase();
   if (v.includes('test')) return 'test-package';
   if (v.includes('1.5')) return 'lesson-1.5h';
+  if (v.includes('4')) return 'lesson-4h';
   if (v.includes('3')) return 'lesson-3h';
   if (v.includes('2')) return 'lesson-2h';
   return 'lesson-1h';
@@ -685,6 +700,8 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     rescheduledTo: raw.rescheduledTo,
     reviewed: raw.reviewed,
     instructorNotes: raw.instructorNotes,
+    applyBuffer: raw.applyBuffer,
+    repeatGroupId: raw.repeatGroupId,
     createdAt: toDate(raw.createdAt),
     history: Array.isArray(raw.history)
       ? raw.history.map((h: any) => ({ ...h, at: toDate(h.at) ?? new Date(0) }))

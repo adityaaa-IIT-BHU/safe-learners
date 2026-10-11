@@ -68,7 +68,25 @@ export const api = {
   withdrawProposal: callable<{ bookingId: string }, { ok: true }>('withdrawProposal'),
   cancelBooking: callable<{ bookingId: string; reason?: string }, { result: 'cancelled' | 'requested' | 'deleted' }>('cancelBooking'),
   resolveLateCancel: callable<{ bookingId: string; decision: 'refund' | 'charge' }, { ok: true }>('resolveLateCancel'),
-  createEvent: callable<{ kind?: 'event' | 'open'; title?: string; startAt: string; endAt: string }, { bookingId: string }>('createEvent'),
+  createEvent: callable<
+    {
+      kind?: 'event' | 'open';
+      title?: string;
+      startAt: string;
+      endAt: string;
+      location?: string;
+      notes?: string;
+      applyBuffer?: boolean;
+      repeat?: 'daily' | 'weekly' | 'fortnightly';
+      occurrences?: number;
+    },
+    { bookingId: string; count: number }
+  >('createEvent'),
+  updateEvent: callable<
+    { bookingId: string; title?: string; startAt: string; endAt: string; location?: string; notes?: string; applyBuffer?: boolean },
+    { ok: true }
+  >('updateEvent'),
+  deleteEvent: callable<{ bookingId: string; series?: boolean }, { deleted: number }>('deleteEvent'),
 
   inviteLearner: callable<
     { firstName: string; surname?: string; email: string; mobile?: string },

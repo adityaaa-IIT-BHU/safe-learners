@@ -6,6 +6,8 @@ export {
   cancelBooking,
   createBooking,
   createEvent,
+  deleteEvent,
+  updateEvent,
   getAvailability,
   proposeBooking,
   resolveLateCancel,

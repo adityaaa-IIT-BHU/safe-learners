@@ -110,7 +110,7 @@ export function CalendarSettings() {
           <Card>
             <CardHeader title="Default calendar view" subtitle="On phones the calendar always opens in day view." />
             <div className="p-5">
-              <Segmented value={s.defaultView} onChange={v => update('defaultView', v)} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }]} className="max-w-xs [&_button]:text-center" />
+              <Segmented value={s.defaultView} onChange={v => update('defaultView', v)} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} className="max-w-sm [&_button]:text-center" />
             </div>
           </Card>
         </div>

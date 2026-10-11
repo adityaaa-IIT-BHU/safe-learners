@@ -69,3 +69,35 @@ export async function attachSuburbAutocomplete(input: HTMLInputElement, onPick: 
   });
   return ac;
 }
+
+/** Attaches Google place suggestions (e.g. "Service NSW Blacktown") to a text input. */
+export async function attachPlaceAutocomplete(input: HTMLInputElement, onPick: (place: { name: string; address?: string; lat?: number; lng?: number }) => void) {
+  const g = await loadMaps();
+  const ac = new g.maps.places.Autocomplete(input, {
+    types: ['establishment'],
+    componentRestrictions: { country: 'au' },
+    fields: ['name', 'formatted_address', 'geometry'],
+  });
+  ac.addListener('place_changed', () => {
+    const p = ac.getPlace();
+    if (!p?.name) return;
+    const loc = p.geometry?.location;
+    onPick({ name: p.name, address: p.formatted_address, ...(loc ? { lat: loc.lat(), lng: loc.lng() } : {}) });
+  });
+  return ac;
+}
+
+/** The suburb at a point on the map (reverse geocoding). */
+export async function suburbAt(lat: number, lng: number): Promise<ServiceArea | null> {
+  const g = await loadMaps();
+  try {
+    const { results } = await new g.maps.Geocoder().geocode({ location: { lat, lng } });
+    const locality = results.find(r => r.types.includes('locality')) ?? results.find(r => r.address_components?.some(c => c.types.includes('locality')));
+    if (!locality) return null;
+    const area = placeToArea(locality);
+    // Centre on the suburb, not the exact click.
+    return area ? { ...area, ...(locality.types.includes('locality') ? {} : { lat: Math.round(lat * 1e5) / 1e5, lng: Math.round(lng * 1e5) / 1e5 }) } : null;
+  } catch {
+    return null;
+  }
+}

@@ -126,10 +126,10 @@ export function InstructorDashboard() {
             <ol className="space-y-3 p-5">
               {view.todays.map(b => (
                 <li key={b.id}>
-                  <Link to={`/instructor/bookings/${b.id}`} className={`block rounded-xl border-l-4 p-3 transition hover:bg-ink-50 dark:hover:bg-ink-800 ${b.kind === 'event' ? 'border-ink-300 bg-ink-50 dark:bg-ink-800/50' : b.status === 'proposed' ? 'border-amber-400 bg-amber-50/60 dark:bg-amber-500/5' : 'border-brand-500 bg-brand-50/60 dark:bg-brand-500/5'}`}>
+                  <Link to={`/instructor/bookings/${b.id}`} className={`block rounded-xl border-l-4 p-3 transition hover:bg-ink-50 dark:hover:bg-ink-800 ${b.kind === 'open' ? 'border-emerald-400 bg-emerald-50/60 dark:bg-emerald-500/5' : b.kind === 'event' ? 'border-ink-300 bg-ink-50 dark:bg-ink-800/50' : b.status === 'proposed' ? 'border-amber-400 bg-amber-50/60 dark:bg-amber-500/5' : 'border-brand-500 bg-brand-50/60 dark:bg-brand-500/5'}`}>
                     <p className="text-xs font-bold text-ink-500">{formatTimeRange(b.startAt, b.endAt, b.timezone)}</p>
-                    <p className="font-semibold">{b.kind === 'event' ? b.title : b.learnerName}</p>
-                    <p className="truncate text-xs text-ink-500">{b.kind === 'event' ? 'Blocked' : `${lessonLabel(b)} · ${b.pickupLocation ?? ''}`}</p>
+                    <p className="font-semibold">{b.kind === 'lesson' ? b.learnerName : lessonLabel(b)}</p>
+                    <p className="truncate text-xs text-ink-500">{b.kind === 'open' ? 'Open for bookings' : b.kind === 'event' ? 'Blocked' : `${lessonLabel(b)} · ${b.pickupLocation ?? ''}`}</p>
                   </Link>
                 </li>
               ))}

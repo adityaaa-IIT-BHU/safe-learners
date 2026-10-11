@@ -37,7 +37,7 @@ export function Calendar() {
   const navigate = useNavigate();
   const tz = me.timezone ?? DEFAULT_TIMEZONE;
   const today = dayKey(new Date(), tz);
-  const [view, setView] = useState<'week' | 'day'>(() => (window.innerWidth < 768 ? 'day' : calendarOf(me).defaultView));
+  const [view, setView] = useState<'week' | 'day' | 'month'>(() => (window.innerWidth < 768 ? 'day' : calendarOf(me).defaultView));
   const [anchor, setAnchor] = useState(today);
   const [menu, setMenu] = useState<{ start: Date; x: number; y: number } | null>(null);
   const [eventDialog, setEventDialog] = useState<{ mode: EventMode; start: Date } | null>(null);
@@ -50,7 +50,11 @@ export function Calendar() {
     return () => clearInterval(t);
   }, []);
 
-  const days = view === 'week' ? Array.from({ length: 7 }, (_, i) => addDaysToKey(mondayOf(anchor), i)) : [anchor];
+  // Month view shows whole weeks (Mon–Sun) covering the month.
+  const monthStart = `${anchor.slice(0, 7)}-01`;
+  const days = view === 'week' ? Array.from({ length: 7 }, (_, i) => addDaysToKey(mondayOf(anchor), i))
+    : view === 'month' ? Array.from({ length: 42 }, (_, i) => addDaysToKey(mondayOf(monthStart), i))
+      : [anchor];
 
   // Visible hours: cover operating hours and any bookings, at least 7am–7pm.
   const [startHour, endHour] = useMemo(() => {
@@ -77,7 +81,10 @@ export function Calendar() {
   const top = (mins: number) => ((mins - startHour * 60) / 60) * HOUR_PX;
 
   const step = view === 'week' ? 7 : 1;
-  const title = view === 'week'
+  const move = (dir: 1 | -1) => setAnchor(a => view === 'month' ? addMonths(a, dir) : addDaysToKey(a, dir * step));
+  const title = view === 'month'
+    ? formatInZone(startOfDayKey(monthStart, tz), { month: 'long', year: 'numeric' }, tz)
+    : view === 'week'
     ? `${formatInZone(startOfDayKey(days[0], tz), { day: 'numeric', month: 'short' }, tz)} – ${formatInZone(startOfDayKey(days[6], tz), { day: 'numeric', month: 'short', year: 'numeric' }, tz)}`
     : formatInZone(startOfDayKey(anchor, tz), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }, tz);
 
@@ -88,7 +95,7 @@ export function Calendar() {
         subtitle="Click any empty time to propose a lesson or block it out."
         actions={
           <>
-            <Segmented value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }]} className="w-40 [&_button]:py-1.5 [&_button]:text-center" />
+            <Segmented value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} className="w-56 [&_button]:py-1.5 [&_button]:text-center" />
             <div className="relative">
               <Button variant="secondary" icon={<CalendarPlus className="size-4" />} onClick={() => setNewOpen(o => !o)} disabled={readOnly}>New <ChevronDown className="size-4" /></Button>
               {newOpen && (
@@ -109,8 +116,8 @@ export function Calendar() {
       <Card className="overflow-hidden">
         <div className="flex items-center gap-2 border-b border-ink-100 px-4 py-3 dark:border-ink-800">
           <Button size="sm" variant="secondary" onClick={() => setAnchor(today)}>Today</Button>
-          <Button size="sm" variant="ghost" aria-label="Previous" onClick={() => setAnchor(a => addDaysToKey(a, -step))}><ChevronLeft className="size-4" /></Button>
-          <Button size="sm" variant="ghost" aria-label="Next" onClick={() => setAnchor(a => addDaysToKey(a, step))}><ChevronRight className="size-4" /></Button>
+          <Button size="sm" variant="ghost" aria-label="Previous" onClick={() => move(-1)}><ChevronLeft className="size-4" /></Button>
+          <Button size="sm" variant="ghost" aria-label="Next" onClick={() => move(1)}><ChevronRight className="size-4" /></Button>
           <p className="ml-2 font-bold">{title}</p>
           <div className="ml-auto hidden items-center gap-3 text-xs text-ink-500 sm:flex">
             <Legend className="bg-emerald-100 dark:bg-emerald-500/15" label="Available" />
@@ -121,6 +128,10 @@ export function Calendar() {
           </div>
         </div>
 
+        {view === 'month' ? (
+          <MonthGrid days={days} month={monthStart.slice(0, 7)} today={today} tz={tz} bookings={visible}
+            onOpenDay={d => { setAnchor(d); setView('day'); }} onOpenBooking={id => navigate(`/instructor/bookings/${id}`)} />
+        ) : (
         <div className="scroll-thin overflow-x-auto">
           <div className={cx('grid', view === 'week' ? 'min-w-[760px]' : '')} style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}>
             <div />
@@ -180,6 +191,7 @@ export function Calendar() {
             })}
           </div>
         </div>
+        )}
       </Card>
 
       {menu && (
@@ -235,5 +247,54 @@ function MenuButton({ icon, onClick, children }: { icon: React.ReactNode; onClic
     <button onClick={onClick} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-ink-100 dark:hover:bg-ink-800">
       {icon}{children}
     </button>
+  );
+}
+
+function addMonths(key: string, n: number): string {
+  const [y, m] = key.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function MonthGrid({ days, month, today, tz, bookings, onOpenDay, onOpenBooking }: {
+  days: string[];
+  month: string; // YYYY-MM
+  today: string;
+  tz: string;
+  bookings: Booking[];
+  onOpenDay: (day: string) => void;
+  onOpenBooking: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-7">
+      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+        <div key={d} className="border-b border-ink-100 py-2 text-center text-[11px] font-bold uppercase text-ink-500 dark:border-ink-800">{d}</div>
+      ))}
+      {days.map(d => {
+        const start = startOfDayKey(d, tz);
+        const end = startOfDayKey(addDaysToKey(d, 1), tz);
+        const items = bookings.filter(b => b.startAt < end && b.endAt > start).sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+        const inMonth = d.startsWith(month);
+        return (
+          <div key={d} onClick={() => onOpenDay(d)}
+            className={cx('min-h-24 cursor-pointer border-b border-l border-ink-100 p-1.5 transition hover:bg-ink-50 dark:border-ink-800 dark:hover:bg-ink-800/40', !inMonth && 'bg-ink-50/60 text-ink-400 dark:bg-ink-900/40')}>
+            <p className={cx('mb-1 flex size-6 items-center justify-center rounded-full text-xs font-bold', d === today && 'bg-ink-950 text-brand-400 dark:bg-brand-500 dark:text-ink-950')}>{Number(d.slice(8))}</p>
+            <div className="space-y-0.5">
+              {items.slice(0, 3).map(b => (
+                <button key={b.id} onClick={e => { e.stopPropagation(); onOpenBooking(b.id); }}
+                  className={cx('block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-semibold',
+                    b.kind === 'open' ? 'border border-dashed border-emerald-500 text-emerald-800 dark:text-emerald-300'
+                      : b.kind === 'event' ? 'bg-ink-200 text-ink-700 dark:bg-ink-700 dark:text-ink-200'
+                        : b.status === 'proposed' ? 'border border-dashed border-amber-500 bg-amber-50 text-amber-900'
+                          : 'bg-brand-400 text-ink-950')}>
+                  {b.kind === 'lesson' ? `${formatTime(b.startAt, tz)} ${b.learnerName ?? ''}` : (b.title || (b.kind === 'open' ? 'Extra hours' : 'Busy'))}
+                </button>
+              ))}
+              {items.length > 3 && <p className="px-1 text-[11px] font-semibold text-ink-500">+{items.length - 3} more</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }

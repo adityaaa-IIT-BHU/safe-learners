@@ -3,7 +3,7 @@ import { Loader2, MapPin, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { areaLabel, type ServiceArea } from '@shared/domain';
-import { attachSuburbAutocomplete, geocodeArea, loadMaps } from '@/lib/maps';
+import { attachSuburbAutocomplete, geocodeArea, loadMaps, suburbAt } from '@/lib/maps';
 import { Button } from './ui';
 
 const SAME = (a: ServiceArea, b: ServiceArea) =>
@@ -92,16 +92,27 @@ export function ServiceAreaEditor({ areas, onChange, onUpgraded, disabled }: {
         ))}
         {upgrading && <span className="inline-flex items-center gap-1.5 text-xs text-ink-500"><Loader2 className="size-3.5 animate-spin" />Adding postcodes…</span>}
       </div>
-      {mapsReady && <ServiceAreaMap areas={areas} />}
+      {mapsReady && (
+        <>
+          <ServiceAreaMap areas={areas} onPick={disabled ? undefined : async (lat, lng) => {
+            const area = await suburbAt(lat, lng);
+            if (area) add(area);
+            else toast.error('Couldn’t find a suburb there — try clicking closer to a town.');
+          }} />
+          {!disabled && <p className="text-xs text-ink-500">Tip: click the map to add the suburb you clicked on.</p>}
+        </>
+      )}
     </div>
   );
 }
 
 /** Map of service suburbs (yellow circles), fitted to the area covered. */
-export function ServiceAreaMap({ areas, className = 'h-72' }: { areas: ServiceArea[]; className?: string }) {
+export function ServiceAreaMap({ areas, className = 'h-72', onPick }: { areas: ServiceArea[]; className?: string; onPick?: (lat: number, lng: number) => void }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
   const shapes = useRef<google.maps.Circle[]>([]);
+  const pickRef = useRef(onPick);
+  pickRef.current = onPick;
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +125,10 @@ export function ServiceAreaMap({ areas, className = 'h-72' }: { areas: ServiceAr
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
+          draggableCursor: onPick ? 'crosshair' : undefined,
+        });
+        map.current.addListener('click', (e: google.maps.MapMouseEvent) => {
+          if (e.latLng && pickRef.current) pickRef.current(e.latLng.lat(), e.latLng.lng());
         });
       }
       shapes.current.forEach(s => s.setMap(null));
@@ -130,6 +145,7 @@ export function ServiceAreaMap({ areas, className = 'h-72' }: { areas: ServiceAr
           fillOpacity: 0.35,
           strokeColor: '#b38100',
           strokeWeight: 1.5,
+          clickable: false, // let clicks reach the map (to add suburbs)
         });
       });
       if (located.length === 1) {

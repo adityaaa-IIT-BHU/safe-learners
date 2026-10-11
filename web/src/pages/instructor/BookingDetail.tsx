@@ -12,6 +12,7 @@ import { errorMessage } from '@/lib/api';
 import { useBooking, useUser } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { InstructorCancelButton, LateCancelActions, WithdrawButton } from './actions';
+import { EventDetail } from './EventDetail';
 
 export function InstructorBookingDetail() {
   const { id } = useParams();
@@ -24,6 +25,9 @@ export function InstructorBookingDetail() {
     return <Card><EmptyState title="Booking not found" action={<ButtonLink to="/instructor">Back to dashboard</ButtonLink>} /></Card>;
   }
 
+  // Personal events, time off and extra open hours have their own page.
+  if (booking.kind !== 'lesson') return <EventDetail booking={booking} />;
+
   const canReschedule = booking.kind === 'lesson' && ['confirmed', 'late_cancel_requested'].includes(booking.status) && !readOnly;
   const net = booking.price !== undefined ? booking.price * (1 - PLATFORM_FEE_RATE) : undefined;
 
@@ -31,7 +35,7 @@ export function InstructorBookingDetail() {
     <>
       <PageHeader
         back={<Link to="/instructor" className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-500 hover:text-ink-900 dark:hover:text-white"><ArrowLeft className="size-4" />Dashboard</Link>}
-        title={<span className="flex flex-wrap items-center gap-3">{booking.kind === 'event' ? booking.title : <>Booking <span className="font-mono">{displayRef(booking)}</span></>} <StatusBadge booking={booking} /></span>}
+        title={<span className="flex flex-wrap items-center gap-3"><>Booking <span className="font-mono">{displayRef(booking)}</span></> <StatusBadge booking={booking} /></span>}
         actions={
           <>
             <LateCancelActions booking={booking} size="md" />

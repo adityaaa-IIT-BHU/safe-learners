@@ -29,7 +29,7 @@ service cloud.firestore {
       return [
         'firstName', 'surname', 'mobile', 'dob', 'gender', 'photoUrl', 'timezone', 'homeSuburb', 'instructorId',
         'bio', 'languages', 'startYear', 'transmission', 'operatingHours', 'servicedSuburbs', 'serviceAreas', 'vehicle',
-        'calendarSettings',
+        'calendarSettings', 'testLocations',
         'onboardingComplete', 'notificationPrefs'
       ];
     }

@@ -29,6 +29,7 @@ export function PaymentBadge({ booking }: { booking: Pick<Booking, 'paymentStatu
 }
 
 export function lessonLabel(b: Booking): string {
+  if (b.kind === 'open') return b.title || 'Extra open hours';
   if (b.kind === 'event') return b.title || 'Personal time';
   return LESSON_TYPES[b.lessonType ?? 'lesson-1h'].label;
 }

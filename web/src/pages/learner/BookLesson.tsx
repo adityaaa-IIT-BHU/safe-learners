@@ -6,7 +6,7 @@ import { LESSON_TYPES, calendarOf, displayRef, fullName, isPrivateLearner, lesso
 import { formatDate, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { SlotPicker } from '@/components/booking';
-import { Avatar, Button, Card, CardHeader, EmptyState, Input, PageHeader, PageLoader, Segmented, Textarea, ButtonLink, formatMoney } from '@/components/ui';
+import { Avatar, Button, Card, CardHeader, EmptyState, Input, PageHeader, PageLoader, Segmented, Select, Textarea, ButtonLink, formatMoney } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useBooking, useUser } from '@/lib/data';
 
@@ -140,7 +140,17 @@ export function BookLesson() {
             <div className="grid gap-4 p-5 sm:grid-cols-2">
               <Input label="Pick up address" placeholder="e.g. 12 Windsor Rd, Kellyville NSW 2155" value={pickup} onChange={e => setPickup(e.target.value)} wrapperClassName="sm:col-span-2" hint={instructor.servicedSuburbs?.length ? `${instructor.firstName} covers ${instructor.servicedSuburbs.slice(0, 4).join(', ')}${instructor.servicedSuburbs.length > 4 ? '…' : ''}` : undefined} />
               <Input label="Drop off address" placeholder="Same as pick up" value={dropoff} onChange={e => setDropoff(e.target.value)} wrapperClassName="sm:col-span-2" />
-              {isTest && <Input label="Test centre" placeholder="e.g. Service NSW Castle Hill" value={testLocation} onChange={e => setTestLocation(e.target.value)} wrapperClassName="sm:col-span-2" />}
+              {isTest && (instructor.testLocations?.length ? (
+                <Select label="Test centre" value={instructor.testLocations.some(l => l.name === testLocation) || !testLocation ? testLocation : '__other'}
+                  onChange={e => setTestLocation(e.target.value === '__other' ? ' ' : e.target.value)} wrapperClassName="sm:col-span-2">
+                  <option value="">Choose your test centre…</option>
+                  {instructor.testLocations.map(l => <option key={l.name} value={l.name}>{l.name}{l.address ? ` — ${l.address}` : ''}</option>)}
+                  <option value="__other">Another centre…</option>
+                </Select>
+              ) : null)}
+              {isTest && (!instructor.testLocations?.length || (testLocation && !instructor.testLocations.some(l => l.name === testLocation))) && (
+                <Input label={instructor.testLocations?.length ? 'Other test centre' : 'Test centre'} placeholder="e.g. Service NSW Castle Hill" value={testLocation.trim() ? testLocation : ''} onChange={e => setTestLocation(e.target.value)} wrapperClassName="sm:col-span-2" />
+              )}
               <Textarea label="Notes for your instructor (optional)" rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything they should know — e.g. practise reverse parking" wrapperClassName="sm:col-span-2" />
             </div>
           </Card>

@@ -13,14 +13,14 @@ import {
 } from '@shared/domain';
 import { dayKey } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
-import { Badge, Button, ButtonLink, Card, CardHeader, Input, PageHeader, Select, cx } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, CardHeader, Input, Modal, PageHeader, Select, cx } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { toDate, useDoc } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { uploadFile } from '@/lib/upload';
 
 type Docs = Partial<Record<VerificationStepKey, VerificationDocument>>;
-interface HistoryEntry extends VerificationDocument { key: VerificationStepKey; replacedAt?: Date }
+interface HistoryEntry extends VerificationDocument { key: VerificationStepKey; replacedAt?: Date; status?: DocumentReview['status'] }
 
 const STATES = ['NSW', 'ACT', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT'];
 const NEEDS_STATE: VerificationStepKey[] = ['driverLicence', 'instructorLicence', 'wwc'];
@@ -143,6 +143,7 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
   const [editingChoice, setEditing] = useState<boolean | null>(null);
   const editing = editingChoice ?? !value?.url;
   const [showHistory, setShowHistory] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
   const [front, setFront] = useState<{ url: string; path: string; name: string } | null>(null);
   const [back, setBack] = useState<{ url: string; path: string; name: string } | null>(null);
   const [number, setNumber] = useState('');
@@ -212,7 +213,7 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
       const previous = allDocs[step.key];
       await setDoc(doc(db, 'users', uid, 'private', 'profile'), {
         verification: { ...allDocs, [step.key]: next },
-        ...(previous ? { verificationHistory: [...history.map(({ key, ...h }) => ({ key, ...h })), { key: step.key, ...previous, replacedAt: new Date() }] } : {}),
+        ...(previous ? { verificationHistory: [...history.map(({ key, ...h }) => ({ key, ...h })), { key: step.key, ...previous, replacedAt: new Date(), ...(review?.status ? { status: review.status } : {}) }] } : {}),
       }, { merge: true });
       await api.submitDocument({ key: step.key });
       toast.success(verified ? `${step.label} sent for review. You stay bookable meanwhile.` : `${step.label} saved`);
@@ -247,8 +248,8 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
             <div><dt className="text-xs font-semibold uppercase text-ink-400">Number</dt><dd className="font-semibold">{value.number || '—'}</dd></div>
             <div><dt className="text-xs font-semibold uppercase text-ink-400">Expires</dt><dd className={cx('font-semibold', isExpired(value.expiry) && 'text-red-600')}>{formatExpiry(value.expiry)}</dd></div>
             <div className="col-span-2 flex flex-wrap gap-3">
-              <a href={value.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />{HAS_BACK.includes(step.key) ? 'Front' : 'View document'}</a>
-              {value.backUrl && <a href={value.backUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Back</a>}
+              <button onClick={() => setPreview(value.url!)} className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />{HAS_BACK.includes(step.key) ? 'Front' : 'View document'}</button>
+              {value.backUrl && <button onClick={() => setPreview(value.backUrl!)} className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Back</button>}
               {isLegacy && <span className="text-xs text-ink-500">Uploaded on the previous website</span>}
             </div>
             {review?.status === 'rejected' && review.note && <p className="col-span-2 text-xs text-red-700">Admin note: {review.note}</p>}
@@ -294,19 +295,29 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
         )}
 
         {showHistory && (
-          <ul className="space-y-2 border-t border-ink-100 pt-3 text-sm dark:border-ink-800">
-            {[...history].reverse().map((h, i) => (
-              <li key={i} className="flex flex-wrap items-center justify-between gap-2">
-                <span>No. {h.number || '—'} · expires {formatExpiry(h.expiry)}</span>
-                <span className="flex items-center gap-3 text-xs text-ink-500">
-                  {h.submittedAt ? `Submitted ${h.submittedAt.toLocaleDateString('en-AU')}` : ''}
-                  {h.url && <a href={h.url} target="_blank" rel="noreferrer" className="font-bold underline">View</a>}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="overflow-x-auto border-t border-ink-100 pt-3 dark:border-ink-800">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs uppercase text-ink-400"><th className="pb-1.5">Submitted</th><th className="pb-1.5">Expiry</th><th className="pb-1.5">Status</th><th /></tr></thead>
+              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                {[...history].reverse().map((h, i) => (
+                  <tr key={i}>
+                    <td className="py-2">{h.submittedAt ? h.submittedAt.toLocaleDateString('en-AU') : '—'}</td>
+                    <td className="py-2">{formatExpiry(h.expiry)}</td>
+                    <td className="py-2">{h.status === 'approved' ? <Badge tone="green">Approved</Badge> : h.status === 'rejected' ? <Badge tone="red">Rejected</Badge> : h.status === 'pending' ? <Badge tone="amber">Replaced before review</Badge> : <Badge>Replaced</Badge>}</td>
+                    <td className="py-2 text-right">{h.url && <button onClick={() => setPreview(h.url!)} className="text-xs font-bold underline">View</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
+      <Modal open={!!preview} onClose={() => setPreview(null)} title={step.label} size="lg"
+        footer={preview ? <a href={preview} target="_blank" rel="noreferrer" className="text-sm font-semibold underline">Open full size</a> : undefined}>
+        {preview && (/\.pdf(\?|$)/i.test(decodeURIComponent(preview))
+          ? <iframe src={preview} title={step.label} className="h-[60vh] w-full rounded-xl border border-ink-200 dark:border-ink-700" />
+          : <img src={preview} alt={step.label} className="mx-auto max-h-[60vh] rounded-xl object-contain" />)}
+      </Modal>
     </Card>
   );
 }

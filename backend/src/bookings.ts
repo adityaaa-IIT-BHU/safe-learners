@@ -18,7 +18,11 @@ import {
   type LessonType,
   type UserProfile,
 } from '../../shared/domain';
-import { DEFAULT_TIMEZONE, dayKey, formatDate, formatTime } from '../../shared/time';
+import { DEFAULT_TIMEZONE, addDaysToKey, atLocalTime, dayKey, formatDate, formatTime } from '../../shared/time';
+
+function localHhmm(d: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+}
 import {
   FieldValue,
   bookingFields,
@@ -90,7 +94,12 @@ function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeId
   const now = new Date();
   return {
     hours: instructor.operatingHours || {},
-    busy: existing.filter(b => !excludeIds.includes(b.id) && holdsSlot(b)).map(b => ({ start: b.startAt, end: b.endAt })),
+    // Personal events can opt out of the travel buffer (e.g. a break at home).
+    busy: existing.filter(b => !excludeIds.includes(b.id) && holdsSlot(b)).map(b => ({
+      start: b.startAt,
+      end: b.endAt,
+      ...(b.kind === 'event' && b.applyBuffer === false ? { bufferMinutes: 0 } : {}),
+    })),
     extraOpen: existing.filter(b => b.kind === 'open' && b.status === 'confirmed').map(b => ({ start: b.startAt, end: b.endAt })),
     timeZone: tzOf(instructor),
     bufferMinutes: cal.bufferMinutes,
@@ -520,32 +529,108 @@ export const resolveLateCancel = onCall(opts, async req => {
   return { ok: true };
 });
 
-// ---------- Instructor personal events (block out time) ----------
+// ---------- Instructor personal events, time off and extra open hours ----------
+
+const REPEAT_DAYS: Record<string, number> = { daily: 1, weekly: 7, fortnightly: 14 };
+
+function eventDetails(data: any) {
+  return {
+    title: str(data?.title, 'Title', { required: false, max: 120 }),
+    location: str(data?.location, 'Address', { required: false, max: 300 }),
+    notes: str(data?.notes, 'Notes', { required: false, max: 1000 }),
+    applyBuffer: data?.applyBuffer !== false,
+  };
+}
 
 export const createEvent = onCall(opts, async req => {
   const instructorId = requireAuth(req);
   const instructor = await requireUser(instructorId, 'instructor');
   // 'event' blocks time (personal events, time off); 'open' adds extra bookable hours.
   const kind = req.data?.kind === 'open' ? 'open' : 'event';
-  const title = str(req.data?.title, 'Title', { required: false, max: 120 }) || (kind === 'open' ? 'Extra open hours' : 'Personal time');
+  const { title, location, notes, applyBuffer } = eventDetails(req.data);
   const startAt = dateArg(req.data?.startAt, 'Start');
   const endAt = dateArg(req.data?.endAt, 'End');
   if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
   if (endAt.getTime() - startAt.getTime() > 60 * 86_400_000) fail('Please block at most 60 days at a time.', 'invalid-argument');
   if (kind === 'open' && endAt.getTime() - startAt.getTime() > 86_400_000) fail('Extra open hours must be within one day.', 'invalid-argument');
-  const ref = await db.collection('bookings').add({
-    ...bookingFields({
-      id: '',
-      kind,
-      status: 'confirmed',
-      instructorId,
-      title,
-      startAt,
-      endAt,
-      timezone: tzOf(instructor),
-    }),
-    createdAt: FieldValue.serverTimestamp(),
-  });
-  return { bookingId: ref.id };
+
+  const every = REPEAT_DAYS[req.data?.repeat as string] ?? 0;
+  const count = every ? Math.min(Math.max(Number(req.data?.occurrences) || 1, 1), 26) : 1;
+  const repeatGroupId = count > 1 ? db.collection('bookings').doc().id : undefined;
+  const tz = tzOf(instructor);
+  const batch = db.batch();
+  const ids: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const ref = db.collection('bookings').doc();
+    ids.push(ref.id);
+    // Same local clock time each occurrence, even across daylight-saving changes.
+    const shift = (d: Date) => i === 0 ? d : atLocalTime(addDaysToKey(dayKey(d, tz), i * every), localHhmm(d, tz), tz);
+    batch.set(ref, {
+      ...bookingFields({
+        id: '',
+        kind,
+        status: 'confirmed',
+        instructorId,
+        title: title || (kind === 'open' ? 'Extra open hours' : 'Personal time'),
+        startAt: shift(startAt),
+        endAt: shift(endAt),
+        timezone: tzOf(instructor),
+        pickupLocation: location || undefined,
+        notes: notes || undefined,
+        applyBuffer: kind === 'event' ? applyBuffer : undefined,
+        repeatGroupId,
+      }),
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+  return { bookingId: ids[0], count };
 });
 
+/** Edit a personal event, time off or extra open hours. */
+export const updateEvent = onCall(opts, async req => {
+  const instructorId = requireAuth(req);
+  const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
+  const event = bookingFrom(await db.doc(`bookings/${bookingId}`).get());
+  if (!event || event.instructorId !== instructorId || event.kind === 'lesson') fail('Event not found.', 'not-found');
+  const { title, location, notes, applyBuffer } = eventDetails(req.data);
+  const startAt = dateArg(req.data?.startAt, 'Start');
+  const endAt = dateArg(req.data?.endAt, 'End');
+  if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
+  if (event.kind === 'open' && endAt.getTime() - startAt.getTime() > 86_400_000) fail('Extra open hours must be within one day.', 'invalid-argument');
+  await db.doc(`bookings/${bookingId}`).update({
+    ...bookingFields({
+      ...event,
+      title: title || event.title,
+      startAt,
+      endAt,
+      pickupLocation: location || undefined,
+      notes: notes || undefined,
+      applyBuffer: event.kind === 'event' ? applyBuffer : undefined,
+    }),
+    pickupLocation: location || FieldValue.delete(),
+    notes: notes || FieldValue.delete(),
+  });
+  return { ok: true };
+});
+
+/** Delete one event, or every remaining occurrence of a repeating one. */
+export const deleteEvent = onCall(opts, async req => {
+  const instructorId = requireAuth(req);
+  const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
+  const event = bookingFrom(await db.doc(`bookings/${bookingId}`).get());
+  if (!event || event.instructorId !== instructorId || event.kind === 'lesson') fail('Event not found.', 'not-found');
+  if (req.data?.series === true && event.repeatGroupId) {
+    const snap = await db.collection('bookings').where('instructorId', '==', instructorId).get();
+    const batch = db.batch();
+    let n = 0;
+    snap.docs.forEach(d => {
+      const b = bookingFrom(d);
+      if (b && b.repeatGroupId === event.repeatGroupId && b.startAt >= event.startAt) { batch.delete(d.ref); n++; }
+    });
+    await batch.commit();
+    return { deleted: n };
+  }
+  await db.doc(`bookings/${bookingId}`).delete();
+  return { deleted: 1 };
+});

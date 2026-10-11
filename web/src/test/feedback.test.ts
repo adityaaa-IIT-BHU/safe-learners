@@ -29,6 +29,20 @@ describe('travel buffer between lessons', () => {
   });
 });
 
+describe('personal events without a travel buffer', () => {
+  it('lets lessons be booked right up to them', () => {
+    const lunch = { ...lesson('12:00', '13:00'), bufferMinutes: 0 };
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lunch], bufferMinutes: 30, now }));
+    expect(t).toContain('11:00 am'); // ends exactly at 12:00
+    expect(t).toContain('1:00 pm'); // starts right after
+  });
+  it('still keeps the buffer around lessons', () => {
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('12:00', '13:00')], bufferMinutes: 30, now }));
+    expect(t).not.toContain('11:00 am');
+    expect(t).toContain('1:30 pm');
+  });
+});
+
 describe('smart scheduling', () => {
   it('does not offer 10am on an empty 9–5 day (it would waste 9–10)', () => {
     const slots = openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], smartGapMinutes: 120, now });

@@ -2,7 +2,8 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { areaLabel, serviceAreasOf, type OperatingHours, type ServiceArea, type TimeRange } from '@shared/domain';
+import { areaLabel, serviceAreasOf, type OperatingHours, type ServiceArea, type TestLocation, type TimeRange } from '@shared/domain';
+import { TestLocationsEditor } from '@/components/TestLocationsEditor';
 import { ServiceAreaEditor } from '@/components/ServiceAreaEditor';
 import { DEFAULT_TIMEZONE, hhmmToMinutes, type Weekday } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
@@ -35,6 +36,7 @@ export function Availability() {
   const { readOnly } = useAuth();
   const [hours, setHours] = useState<OperatingHours>(() => structuredClone(me.operatingHours ?? {}));
   const [areas, setAreas] = useState<ServiceArea[]>(() => serviceAreasOf(me));
+  const [testLocations, setTestLocations] = useState<TestLocation[]>(me.testLocations ?? []);
   const [timezone, setTimezone] = useState(me.timezone ?? DEFAULT_TIMEZONE);
   const [saving, setSaving] = useState(false);
 
@@ -50,6 +52,7 @@ export function Availability() {
         // Located areas power postcode search and the map; plain labels keep older screens working.
         serviceAreas: areas.map(a => Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined))),
         servicedSuburbs: areas.map(areaLabel),
+        testLocations: testLocations.map(l => Object.fromEntries(Object.entries(l).filter(([, v]) => v !== undefined))),
         timezone,
       });
       toast.success('Availability saved — learners see your new times straight away.');
@@ -133,6 +136,10 @@ export function Availability() {
                 }}
               />
             </div>
+          </Card>
+          <Card>
+            <CardHeader title="Driving test locations" subtitle="Test centres you take learners to. Learners choose one when booking a test package." />
+            <div className="p-5"><TestLocationsEditor value={testLocations} onChange={setTestLocations} disabled={readOnly} /></div>
           </Card>
           <Card>
             <CardHeader title="Time zone" />
