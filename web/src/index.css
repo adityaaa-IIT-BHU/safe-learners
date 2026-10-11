@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* L-plate yellow */
+  --color-brand-50: #fffbea;
+  --color-brand-100: #fff3c4;
+  --color-brand-200: #ffe58a;
+  --color-brand-300: #ffd84d;
+  --color-brand-400: #ffcb1f;
+  --color-brand-500: #ffc700;
+  --color-brand-600: #e0a800;
+  --color-brand-700: #b38100;
+  --color-brand-800: #8a6300;
+  --color-brand-900: #5c4200;
+
+  /* Ink */
+  --color-ink-50: #f6f7f9;
+  --color-ink-100: #eceef2;
+  --color-ink-200: #d5d9e1;
+  --color-ink-300: #b1b8c5;
+  --color-ink-400: #8590a3;
+  --color-ink-500: #667085;
+  --color-ink-600: #4b5565;
+  --color-ink-700: #364152;
+  --color-ink-800: #1f2937;
+  --color-ink-900: #111827;
+  --color-ink-950: #0a0e17;
+
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.25rem;
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
+  --shadow-lift: 0 12px 32px -8px rgb(16 24 40 / 0.18);
+
+  --animate-fade-in: fade-in 0.25s ease-out;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-ink-50 text-ink-900 dark:bg-ink-950 dark:text-ink-100;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+  ::selection {
+    @apply bg-brand-300 text-ink-950;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-ink-200/70 bg-white shadow-card dark:border-ink-800 dark:bg-ink-900;
+  }
+  .input {
+    @apply block w-full rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 shadow-sm
+      placeholder:text-ink-400 transition focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/20
+      disabled:cursor-not-allowed disabled:bg-ink-100 disabled:text-ink-500
+      dark:border-ink-700 dark:bg-ink-900 dark:text-ink-100 dark:placeholder:text-ink-500 dark:disabled:bg-ink-800;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink-700 dark:text-ink-300;
+  }
+  .lplate {
+    @apply inline-flex items-center justify-center rounded-md bg-brand-500 font-extrabold text-ink-950;
+  }
+}
+
+/* Thin scrollbars for horizontal strips */
+.scroll-thin::-webkit-scrollbar { height: 6px; width: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgb(133 144 163 / 0.4); border-radius: 999px; }

@@ -1,10 +1,29 @@
 rules_version = '2';
 
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    function isOwner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function isAdmin() { return request.auth != null && request.auth.token.admin == true; }
+    function isImage() { return request.resource.contentType.matches('image/.*'); }
+    function isDocument() { return isImage() || request.resource.contentType == 'application/pdf'; }
+
+    // Profile and vehicle photos: public, owner-managed, images under 5 MB.
+    match /photos/{uid}/{file=**} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isImage() && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Verification documents: private to the instructor and admins, images/PDF under 10 MB.
+    // Same folder the existing licence-processing function watches.
+    match /licenses/{uid}/{file=**} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid) && isDocument() && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // Legacy uploads from the old site stay readable.
+    match /instructor-photos/{uid}/{file=**} { allow read: if true; }
+    match /vehicle-photos/{uid}/{file=**} { allow read: if true; }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

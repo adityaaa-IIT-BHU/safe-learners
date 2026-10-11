@@ -1,18 +1,120 @@
-rules_version='2'
+rules_version = '2';
 
+// Safe Learners security rules.
+// Bookings, wallets, prices, verification status and reviews are only written by Cloud Functions,
+// which check permissions and booking conflicts in transactions.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
+    function myProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isInstructor() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && myProfile().role == 'instructor';
+    }
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // Fields users may edit on their own profile.
+    function editableProfileFields() {
+      return [
+        'firstName', 'surname', 'mobile', 'dob', 'gender', 'photoUrl', 'timezone', 'homeSuburb', 'instructorId',
+        'bio', 'languages', 'startYear', 'transmission', 'operatingHours', 'servicedSuburbs', 'serviceAreas', 'vehicle',
+        'calendarSettings',
+        'onboardingComplete', 'notificationPrefs'
+      ];
+    }
+
+    match /users/{uid} {
+      // Instructor profiles are public (browse & book). Learners are visible to themselves,
+      // instructors (to propose lessons) and admins.
+      allow get, list: if resource.data.role == 'instructor'
+        || isSelf(uid)
+        || isAdmin()
+        || (resource.data.role == 'learner' && isInstructor());
+
+      allow create: if isSelf(uid)
+        && request.resource.data.role in ['learner', 'instructor']
+        && request.resource.data.keys().hasOnly(editableProfileFields().concat(['role', 'email', 'verificationStatus', 'createdAt']))
+        && (!('verificationStatus' in request.resource.data) || request.resource.data.verificationStatus == 'not_submitted');
+
+      allow update: if isSelf(uid) && changedOnly(editableProfileFields());
+
+      // Verification documents and other private details.
+      match /private/{doc} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if isAdmin() || (isSelf(uid) && doc != 'banking');
+      }
+
+      // Payout details: bank account can't be changed by the instructor once saved (security);
+      // billing info and payout frequency stay editable. Admins can update anything.
+      match /private/banking {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create: if isSelf(uid) || isAdmin();
+        allow update: if isAdmin() || (
+          isSelf(uid)
+          && (!('bank' in resource.data) || request.resource.data.bank == resource.data.bank)
+        );
+      }
+
+      // Wallet ledger (written by Cloud Functions).
+      match /transactions/{id} {
+        allow read: if isSelf(uid) || isAdmin();
+      }
+    }
+
+    match /bookings/{id} {
+      allow read: if signedIn() && (
+        resource.data.learnerId == request.auth.uid
+        || resource.data.instructorId == request.auth.uid
+        || isAdmin()
+      );
+      // Instructors may keep private notes on their own bookings.
+      allow update: if signedIn()
+        && resource.data.instructorId == request.auth.uid
+        && changedOnly(['instructorNotes']);
+    }
+
+    match /reviews/{id} {
+      allow read: if true;
+      // Instructors can publicly reply to reviews of their own lessons.
+      allow update: if signedIn()
+        && resource.data.instructorId == request.auth.uid
+        && changedOnly(['reply', 'replyAt'])
+        && request.resource.data.reply is string
+        && request.resource.data.reply.size() <= 1000;
+    }
+
+    match /notifications/{id} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && isAdmin())
+      );
+      allow update: if signedIn()
+        && (resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && isAdmin()))
+        && changedOnly(['read']);
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /feedback/{id} {
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.message is string
+        && request.resource.data.message.size() < 5000;
+      allow read: if isAdmin();
+    }
+
+    match /instructorReferrals/{id} {
+      allow create: if signedIn() && request.resource.data.referrerId == request.auth.uid;
+      allow read: if isAdmin() || (signedIn() && resource.data.referrerId == request.auth.uid);
+    }
+
+    // Everything else (counters, legacy collections) is server-only.
     match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2025, 10, 17);
+      allow read, write: if false;
     }
   }
 }

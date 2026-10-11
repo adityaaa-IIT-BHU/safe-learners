@@ -67,3 +67,21 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Build output
+web/dist/
+backend/lib/
+functions/lib/
+
+# Local environment and emulator files
+*.local
+.env.*
+!.env.example
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+
+# OS / editor
+.DS_Store
+.vscode/
