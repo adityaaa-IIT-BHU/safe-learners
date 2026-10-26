@@ -5,6 +5,7 @@ import {
   LESSON_TYPES,
   STATUS_META,
   displayRef,
+  isExpiredProposal,
   type Booking,
   type LessonType,
 } from '@shared/domain';
@@ -12,8 +13,9 @@ import { DEFAULT_TIMEZONE, addDaysToKey, dayKey, formatDate, formatInZone, forma
 import { api, errorMessage } from '@/lib/api';
 import { Avatar, Badge, Button, Skeleton, cx } from './ui';
 
-export function StatusBadge({ booking }: { booking: Pick<Booking, 'status' | 'paymentStatus'> }) {
-  const meta = STATUS_META[booking.status];
+export function StatusBadge({ booking }: { booking: Pick<Booking, 'status' | 'expiresAt' | 'createdAt' | 'startAt'> }) {
+  // A lapsed proposal shows as expired before the scheduled job updates it.
+  const meta = STATUS_META[isExpiredProposal(booking) ? 'expired' : booking.status];
   return <Badge tone={meta.tone}>{meta.label}</Badge>;
 }
 

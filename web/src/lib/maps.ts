@@ -5,6 +5,15 @@ import type { ServiceArea } from '@shared/domain';
 const MAPS_KEY = 'AIzaSyCnR1zekmfJ04AnY4FeJUVRGildidvU0rg';
 
 let loading: Promise<typeof google> | null = null;
+let authFailed = false;
+const authFailureListeners = new Set<() => void>();
+
+/** Calls `cb` if Google rejects the key (it can do so after loading); returns an unsubscribe. */
+export function onMapsUnavailable(cb: () => void): () => void {
+  if (authFailed) cb();
+  authFailureListeners.add(cb);
+  return () => authFailureListeners.delete(cb);
+}
 
 /** Loads the Maps JavaScript API (with Places) once, on the pages that need it. */
 export function loadMaps(): Promise<typeof google> {
@@ -13,7 +22,11 @@ export function loadMaps(): Promise<typeof google> {
   loading = new Promise((resolve, reject) => {
     const callback = `__slMapsReady${Date.now()}`;
     (window as unknown as Record<string, () => void>)[callback] = () => resolve(window.google);
-    (window as unknown as Record<string, () => void>).gm_authFailure = () => reject(new Error('Google Maps key was rejected'));
+    (window as unknown as Record<string, () => void>).gm_authFailure = () => {
+      authFailed = true;
+      authFailureListeners.forEach(f => f());
+      reject(new Error('Google Maps key was rejected'));
+    };
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async&callback=${callback}&region=AU`;
     script.async = true;
@@ -42,17 +55,38 @@ export function placeToArea(place: google.maps.places.PlaceResult | google.maps.
   };
 }
 
+/** A searched suburb or postcode; `localities` lists every suburb sharing the postcode. */
+export type LocatedArea = ServiceArea & { localities?: string[] };
+
 /** Finds a suburb or postcode in Australia; null if Google can't place it. */
-export async function geocodeArea(query: string): Promise<ServiceArea | null> {
+export async function geocodeArea(query: string): Promise<LocatedArea | null> {
   const g = await loadMaps();
   const geocoder = new g.maps.Geocoder();
-  const address = /^\d{4}$/.test(query.trim()) ? `${query.trim()}, Australia` : `${query.trim()}, Australia`;
   try {
-    const { results } = await geocoder.geocode({ address, componentRestrictions: { country: 'AU' } });
-    return results[0] ? placeToArea(results[0]) : null;
+    const { results } = await geocoder.geocode({ address: `${query.trim()}, Australia`, componentRestrictions: { country: 'AU' } });
+    const area = results[0] ? placeToArea(results[0]) : null;
+    if (!area) return null;
+    // Postcode results name one suburb but list all of them here (e.g. 2762: Schofields, Colebee).
+    const localities = results[0].postcode_localities?.filter(Boolean);
+    return localities?.length ? { ...area, localities } : area;
   } catch {
     return null;
   }
+}
+
+/** Attaches Google street-address suggestions to a text input; `onPick` gets the chosen address. */
+export async function attachAddressAutocomplete(input: HTMLInputElement, onPick: (address: string) => void) {
+  const g = await loadMaps();
+  const ac = new g.maps.places.Autocomplete(input, {
+    types: ['address'],
+    componentRestrictions: { country: 'au' },
+    fields: ['formatted_address'],
+  });
+  ac.addListener('place_changed', () => {
+    const address = ac.getPlace()?.formatted_address?.replace(/,\s*Australia$/, '');
+    if (address) onPick(address);
+  });
+  return ac;
 }
 
 /** Attaches Google suburb suggestions to a text input. */

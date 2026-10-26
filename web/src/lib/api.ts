@@ -1,6 +1,6 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import type { LessonType, VerificationStepKey } from '@shared/domain';
+import type { DrivingExperience, LessonType, VerificationStepKey } from '@shared/domain';
 import { functions } from './firebase';
 
 function callable<Req, Res>(name: string) {
@@ -46,6 +46,8 @@ export const api = {
       dropoffLocation?: string;
       testLocation?: string;
       notes?: string;
+      experience?: DrivingExperience;
+      testBooked?: boolean;
       rescheduleOf?: string;
     },
     { bookingId: string; ref: string; paymentStatus: string }

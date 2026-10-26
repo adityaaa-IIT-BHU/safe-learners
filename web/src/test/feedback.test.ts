@@ -44,25 +44,27 @@ describe('personal events without a travel buffer', () => {
 });
 
 describe('smart scheduling', () => {
-  it('does not offer 10am on an empty 9–5 day (it would waste 9–10)', () => {
-    const slots = openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], smartGapMinutes: 120, now });
-    const t = times(slots);
-    expect(t).toContain('9:00 am');
-    expect(t).not.toContain('9:30 am'); // leaves a 30 min gap
-    expect(t).not.toContain('10:00 am'); // leaves a 1 hr gap (< 2 hr)
-    expect(t).toContain('11:00 am'); // leaves a 2 hr gap: bookable
-    expect(t).toContain('4:00 pm'); // finishes exactly at close
+  // Client feedback (Oct 2026): on quiet days every time must show, so only gaps next to a lesson count.
+  it('offers every time on an empty 9–5 day', () => {
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], smartGapMinutes: 120, now }));
+    expect(t).toEqual(times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], now })));
+    expect(t).toContain('9:30 am');
+    expect(t).toContain('10:00 am');
   });
-  it('counts the travel buffer when judging gaps (the client’s 10am example)', () => {
-    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], bufferMinutes: 30, smartGapMinutes: 60, now }));
-    expect(t[0]).toBe('9:00 am');
-    expect(t).not.toContain('10:00 am'); // 9–10 can't fit a lesson + 30 min buffer
-    expect(t).toContain('10:30 am'); // leaves 9–10:30: a 1 hr lesson + buffer fits
+  it('counts the travel buffer when judging gaps next to a lesson', () => {
+    // Lesson 12–1pm with a 30 min buffer: busy 11:30–1:30. Gaps under 1 hr + buffer next to it are avoided.
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('12:00', '13:00')], bufferMinutes: 30, smartGapMinutes: 60, now }));
+    expect(t).toContain('9:00 am'); // leaves 1.5 hr before the buffer: a lesson + buffer fits
+    expect(t).not.toContain('10:00 am'); // would strand 30 min before the buffer
+    expect(t).toContain('10:30 am'); // runs right up to the buffer
+    expect(t).toContain('1:30 pm'); // straight after the buffer
+    expect(t).not.toContain('2:00 pm'); // would strand 30 min after it
+    expect(t).toContain('3:00 pm');
   });
-  it('still offers times in a short window (flush to its start or end)', () => {
+  it('offers every time in a short window with no lessons', () => {
     const extra = [{ start: atLocalTime('2026-10-18', '10:00'), end: atLocalTime('2026-10-18', '12:00') }];
     const t = times(openSlotsForDay({ day: '2026-10-18', durationMinutes: 60, hours: {}, busy: [], extraOpen: extra, bufferMinutes: 30, smartGapMinutes: 60, now }));
-    expect(t).toEqual(['10:00 am', '11:00 am']);
+    expect(t).toEqual(['10:00 am', '10:30 am', '11:00 am']);
   });
   it('slots right after an existing lesson plus buffer', () => {
     const slots = openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('09:00', '10:00')], bufferMinutes: 30, smartGapMinutes: 60, now });

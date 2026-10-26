@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CREDIT_PACKAGES,
+  coversArea,
   creditPackagePrice,
   formatBookingRef,
+  holdsSlot,
+  isExpiredProposal,
+  isPlausibleAddress,
   learnerCanReschedule,
+  learnerCanReview,
   lessonPrice,
   normaliseBooking,
   openSlotsForDay,
   parseLegacyDate,
   parseLegacyTime,
+  proposalExpiresAt,
   type Booking,
 } from '@shared/domain';
 import { atLocalTime, dayKey, formatTime, fromZoned, toZoned, weekdayOfKey } from '@shared/time';
@@ -54,10 +61,14 @@ describe('pricing', () => {
     expect(lessonPrice('lesson-2h', pricing)).toBe(150);
     expect(lessonPrice('test-package', pricing)).toBe(240);
   });
-  it('applies package discounts', () => {
-    expect(creditPackagePrice(10, 70)).toEqual({ gross: 700, discount: 70, total: 630 });
-    expect(creditPackagePrice(6, 70)).toEqual({ gross: 420, discount: 21, total: 399 });
-    expect(creditPackagePrice(3, 70)).toEqual({ gross: 210, discount: 0, total: 210 });
+  it('sells wallet credit at the fixed package prices', () => {
+    expect(CREDIT_PACKAGES.map(p => [p.title, p.price])).toEqual([
+      ['1 hour lesson', 70], ['1.5 hour lesson', 100], ['2 hour lesson', 130], ['5 hour package', 315], ['10 hour package', 630],
+    ]);
+    expect(creditPackagePrice('lesson-1h')).toEqual({ hours: 1, gross: 70, discount: 0, total: 70 });
+    expect(creditPackagePrice('lesson-1.5h')).toEqual({ hours: 1.5, gross: 105, discount: 5, total: 100 });
+    expect(creditPackagePrice('package-5h')).toEqual({ hours: 5, gross: 350, discount: 35, total: 315 });
+    expect(creditPackagePrice('package-10h')).toEqual({ hours: 10, gross: 700, discount: 70, total: 630 });
   });
 });
 
@@ -93,6 +104,74 @@ describe('availability', () => {
   });
   it('returns nothing on closed days', () => {
     expect(openSlotsForDay({ day: '2026-10-08', durationMinutes: 60, hours, busy: [], now })).toEqual([]);
+  });
+
+  describe('smart scheduling', () => {
+    const saturday = '2026-10-24';
+    const satHours = { saturday: [{ start: '09:00', end: '14:00' }] };
+    const smart = { day: saturday, durationMinutes: 60, hours: satHours, now, smartGapMinutes: 60, bufferMinutes: 60 };
+    const times = (busy: { start: Date; end: Date }[]) => openSlotsForDay({ ...smart, busy }).map(s => formatTime(s.start));
+
+    it('offers every start on a day with no lessons (client report: only 9:00, 11:00 and 1:00 showed)', () => {
+      expect(times([])).toEqual(['9:00 am', '9:30 am', '10:00 am', '10:30 am', '11:00 am', '11:30 am', '12:00 pm', '12:30 pm', '1:00 pm']);
+    });
+    it('still avoids stranding a short gap next to an existing lesson', () => {
+      // Lesson 12–1pm with a 1h buffer: the instructor is busy 11am–2pm, so 9–11am is free.
+      const busy = [{ start: atLocalTime(saturday, '12:00'), end: atLocalTime(saturday, '13:00') }];
+      // 9:30 would leave 30 minutes before the buffer; 9:00 (start of day) and 10:00 (right up to the buffer) are fine.
+      expect(times(busy)).toEqual(['9:00 am', '10:00 am']);
+    });
+  });
+});
+
+describe('postcode search', () => {
+  const schofields = { serviceAreas: [{ name: 'Colebee', state: 'NSW', postcode: '2761' }] };
+  it('matches any suburb that shares the searched postcode', () => {
+    const located = { lat: -33.7, lng: 150.9, postcode: '2762', name: 'Schofields', localities: ['Schofields', 'Colebee'] };
+    expect(coversArea(schofields, '2762', located)).toBe(true);
+    expect(coversArea(schofields, '2762', { ...located, localities: undefined })).toBe(false);
+  });
+});
+
+describe('proposals', () => {
+  const proposed = (hoursAgo: number, startsInHours: number, withExpiry = true): Booking => {
+    const createdAt = new Date(Date.now() - hoursAgo * 3_600_000);
+    const startAt = new Date(Date.now() + startsInHours * 3_600_000);
+    return {
+      id: 'p', kind: 'lesson', status: 'proposed', instructorId: 'I', timezone: 'Australia/Sydney', createdAt, startAt,
+      endAt: new Date(startAt.getTime() + 3_600_000), expiresAt: withExpiry ? proposalExpiresAt(createdAt, startAt) : undefined,
+    };
+  };
+  it('expires after 24 hours and releases the time', () => {
+    expect(isExpiredProposal(proposed(23, 72))).toBe(false);
+    expect(holdsSlot(proposed(23, 72))).toBe(true);
+    expect(isExpiredProposal(proposed(25, 72))).toBe(true);
+    expect(holdsSlot(proposed(25, 72))).toBe(false);
+  });
+  it('expires when the lesson starts if that is sooner', () => {
+    const p = proposed(0, 3);
+    expect(p.expiresAt!.getTime()).toBe(p.startAt.getTime());
+  });
+  it('applies to proposals made before expiry existed', () => {
+    expect(isExpiredProposal(proposed(30, 72, false))).toBe(true);
+  });
+});
+
+describe('feedback', () => {
+  const lesson = { kind: 'lesson', endAt: new Date(Date.now() - 3_600_000) } as const;
+  it('asks for feedback on finished, unrated lessons only', () => {
+    expect(learnerCanReview({ ...lesson, status: 'completed' })).toBe(true);
+    expect(learnerCanReview({ ...lesson, status: 'confirmed' })).toBe(true);
+    expect(learnerCanReview({ ...lesson, status: 'completed', reviewed: true })).toBe(false);
+    expect(learnerCanReview({ ...lesson, status: 'cancelled' })).toBe(false);
+  });
+});
+
+describe('addresses', () => {
+  it('rejects scraps like "12 Y" and accepts real addresses', () => {
+    expect(isPlausibleAddress('12 Y')).toBe(false);
+    expect(isPlausibleAddress('12')).toBe(false);
+    expect(isPlausibleAddress('12 Yelta St, The Ponds NSW 2769')).toBe(true);
   });
 });
 

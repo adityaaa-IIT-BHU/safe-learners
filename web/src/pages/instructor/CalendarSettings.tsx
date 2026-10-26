@@ -103,7 +103,7 @@ export function CalendarSettings() {
                     options={[{ value: '60', label: '1 hour' }, { value: '120', label: '2 hours' }]} className="max-w-xs [&_button]:text-center" />
                 </div>
               )}
-              <p className="text-xs text-ink-500">Example: you’re free 9am–5pm. Without smart scheduling a learner could book 10am, leaving 9–10am empty. With it on, learners are offered 9am (or a time that leaves at least the gap above).</p>
+              <p className="text-xs text-ink-500">Example: you have a lesson 12–1pm. Without smart scheduling a learner could book 1:30pm, leaving a 30 minute gap after your lesson that nobody can book. With it on, they’re offered 1pm (or a time that leaves at least the gap above). Times at the start and end of your day are always offered, so quiet days stay fully bookable.</p>
             </div>
           </Card>
 

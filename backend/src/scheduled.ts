@@ -1,8 +1,10 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
   LESSON_TYPES,
+  PROPOSAL_EXPIRY_HOURS,
   REFERRAL_REWARD_FRIEND,
   REFERRAL_REWARD_REFERRER,
+  isExpiredProposal,
   pricingOf,
 } from '../../shared/domain';
 import { formatDate, formatTime } from '../../shared/time';
@@ -33,11 +35,41 @@ export const completeLessons = onSchedule({ ...opts, schedule: 'every 30 minutes
       title: `How was your lesson with ${booking.instructorName}?`,
       body: 'Leave a quick rating to help other learners find great instructors.',
       link: `/learner/bookings/${booking.id}?review=1`,
-      email: false,
     });
     if (booking.learnerId) await payReferralReward(booking.learnerId);
   }
   logger.info(`Completed ${snap.size} bookings`);
+});
+
+/** Closes proposals the learner didn't answer in time, freeing the instructor's slot. */
+export const expireProposals = onSchedule({ ...opts, schedule: 'every 15 minutes' }, async () => {
+  const snap = await db.collection('bookings').where('status', '==', 'proposed').get();
+  let expired = 0;
+  for (const doc of snap.docs) {
+    const booking = bookingFrom(doc);
+    if (!booking || !isExpiredProposal(booking)) continue;
+    await doc.ref.update({
+      ...bookingFields({ ...booking, status: 'expired' }),
+      history: FieldValue.arrayUnion(historyEntry(`Expired: not answered within ${PROPOSAL_EXPIRY_HOURS} hours`, 'system')),
+    });
+    expired++;
+    const when = `${formatDate(booking.startAt, booking.timezone)} at ${formatTime(booking.startAt, booking.timezone)}`;
+    await notify(booking.learnerId, {
+      type: 'proposal_expired',
+      title: `Proposed lesson with ${booking.instructorName} expired`,
+      body: `The lesson proposed for ${when} wasn't accepted in time, so the time has been released. You can book a new time any time.`,
+      link: `/learner/bookings/${booking.id}`,
+      email: false,
+    });
+    await notify(booking.instructorId, {
+      type: 'proposal_expired',
+      title: `${booking.learnerName ?? 'The learner'} didn't answer booking ${booking.ref ?? ''}`.trim(),
+      body: `Your proposal for ${when} expired after ${PROPOSAL_EXPIRY_HOURS} hours and the time is free again.`,
+      link: `/instructor/bookings/${booking.id}`,
+      email: false,
+    });
+  }
+  logger.info(`Expired ${expired} proposals`);
 });
 
 /** First completed lesson of a referred learner credits both learners once. */

@@ -1,9 +1,9 @@
 import { doc, updateDoc } from 'firebase/firestore';
-import { ArrowLeft, CarFront, Clock, Mail, MapPin, Phone, RefreshCw, StickyNote } from 'lucide-react';
+import { ArrowLeft, CalendarCheck, CarFront, Clock, GraduationCap, Mail, MapPin, Phone, RefreshCw, StickyNote } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { PLATFORM_FEE_RATE, displayRef, fullName, type Booking } from '@shared/domain';
+import { DRIVING_EXPERIENCE, PLATFORM_FEE_RATE, displayRef, fullName, type Booking } from '@shared/domain';
 import { formatDate, formatTimeRange } from '@shared/time';
 import { useAuth } from '@/auth/AuthProvider';
 import { AddToCalendarButton, BookingTimeline, PaymentBadge, StatusBadge, lessonLabel } from '@/components/booking';
@@ -74,7 +74,9 @@ export function InstructorBookingDetail() {
               {booking.pickupLocation && <Info icon={<MapPin className="size-4" />} label="Pick up">{booking.pickupLocation}</Info>}
               {booking.dropoffLocation && booking.dropoffLocation !== booking.pickupLocation && <Info icon={<MapPin className="size-4" />} label="Drop off">{booking.dropoffLocation}</Info>}
               {booking.testLocation && <Info icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}</Info>}
-              {booking.notes && <Info icon={<StickyNote className="size-4" />} label="Learner’s notes">{booking.notes}</Info>}
+              {booking.experience && <Info icon={<GraduationCap className="size-4" />} label="Driving experience">{DRIVING_EXPERIENCE[booking.experience]}</Info>}
+              {booking.testBooked !== undefined && <Info icon={<CalendarCheck className="size-4" />} label="Driving test booked?">{booking.testBooked ? 'Yes' : 'No'}</Info>}
+              {booking.notes && <Info icon={<StickyNote className="size-4" />} label={booking.experience ? 'Wants to work on' : 'Learner’s notes'}>{booking.notes}</Info>}
             </dl>
             {booking.kind === 'lesson' && ['confirmed', 'proposed'].includes(booking.status) && (
               <div className="border-t border-ink-100 px-5 py-4 dark:border-ink-800"><AddToCalendarButton booking={booking} withName={booking.learnerName} /></div>

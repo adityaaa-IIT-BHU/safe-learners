@@ -1,7 +1,7 @@
 import { CalendarOff, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Lock, Send } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { calendarOf, type Booking } from '@shared/domain';
+import { CLOSED_STATUSES, calendarOf, isExpiredProposal, type Booking } from '@shared/domain';
 import {
   DEFAULT_TIMEZONE,
   addDaysToKey,
@@ -77,7 +77,7 @@ export function Calendar() {
   // Cancelled, declined and withdrawn bookings don't occupy time, so they're left off the calendar.
   const firstDay = startOfDayKey(days[0], tz);
   const lastDayEnd = startOfDayKey(addDaysToKey(days[days.length - 1], 1), tz);
-  const visible = bookings.filter(b => b.startAt < lastDayEnd && b.endAt > firstDay && !['declined', 'withdrawn', 'cancelled'].includes(b.status));
+  const visible = bookings.filter(b => b.startAt < lastDayEnd && b.endAt > firstDay && !CLOSED_STATUSES.includes(b.status) && !isExpiredProposal(b));
   const top = (mins: number) => ((mins - startHour * 60) / 60) * HOUR_PX;
 
   const step = view === 'week' ? 7 : 1;

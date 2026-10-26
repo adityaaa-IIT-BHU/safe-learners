@@ -1,20 +1,26 @@
 import type { Transaction } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import {
+  DRIVING_EXPERIENCE,
   FREE_CANCELLATION_HOURS,
   LESSON_TYPES,
+  PROPOSAL_EXPIRY_HOURS,
   calendarOf,
   STATUS_META,
   fullName,
   holdsSlot,
   hoursUntil,
+  isExpiredProposal,
+  isPlausibleAddress,
   learnerCanReschedule,
   lessonPrice,
   openSlotsForDay,
   openSlotsForRange,
   overlaps,
   pricingFor,
+  proposalExpiresAt,
   type Booking,
+  type DrivingExperience,
   type LessonType,
   type UserProfile,
 } from '../../shared/domain';
@@ -55,6 +61,12 @@ function str(v: unknown, field: string, { required = true, max = 300 } = {}): st
 function lessonTypeArg(v: unknown): LessonType {
   if (typeof v !== 'string' || !(v in LESSON_TYPES)) fail('Unknown lesson type.', 'invalid-argument');
   return v as LessonType;
+}
+
+function addressArg(v: unknown, field: string, { required = true } = {}): string {
+  const value = str(v, field, { required });
+  if (value && !isPlausibleAddress(value)) fail(`Please enter a full ${field.toLowerCase()}, e.g. 12 Windsor Rd, Kellyville.`, 'invalid-argument');
+  return value;
 }
 
 function dateArg(v: unknown, field: string): Date {
@@ -169,11 +181,14 @@ export const createBooking = onCall(opts, async req => {
   const instructorId = str(req.data?.instructorId, 'instructorId', { max: 128 });
   const lessonType = lessonTypeArg(req.data?.lessonType);
   const startAt = dateArg(req.data?.startAt, 'startAt');
-  const pickupLocation = str(req.data?.pickupLocation, 'Pick up location');
-  const dropoffLocation = str(req.data?.dropoffLocation, 'Drop off location', { required: false }) || pickupLocation;
+  const pickupLocation = addressArg(req.data?.pickupLocation, 'Pick up address');
+  const dropoffLocation = addressArg(req.data?.dropoffLocation, 'Drop off address', { required: false }) || pickupLocation;
   const testLocation = str(req.data?.testLocation, 'Test location', { required: lessonType === 'test-package' });
   const notes = str(req.data?.notes, 'Notes', { required: false, max: 1000 });
   const rescheduleOf = str(req.data?.rescheduleOf, 'rescheduleOf', { required: false, max: 128 });
+  // Optional so a page loaded before this release can still book.
+  const experience = req.data?.experience in DRIVING_EXPERIENCE ? req.data.experience as DrivingExperience : undefined;
+  const testBooked = typeof req.data?.testBooked === 'boolean' ? req.data.testBooked as boolean : undefined;
 
   const minutes = LESSON_TYPES[lessonType].minutes;
   const endAt = new Date(startAt.getTime() + minutes * 60_000);
@@ -240,6 +255,8 @@ export const createBooking = onCall(opts, async req => {
       dropoffLocation,
       testLocation: testLocation || undefined,
       notes: notes || undefined,
+      experience,
+      testBooked,
       price,
       paymentStatus: paid ? 'paid' : 'unpaid',
       proposedBy: 'learner',
@@ -253,11 +270,23 @@ export const createBooking = onCall(opts, async req => {
     tx.update(db.doc(`users/${learnerId}`), {
       bookedInstructorIds: FieldValue.arrayUnion(instructorId),
       ...(learner.instructorId ? {} : { instructorId }),
+      // Remembered so the next booking form starts with these answers.
+      ...(experience ? { drivingExperience: experience } : {}),
+      ...(testBooked !== undefined ? { testBooked } : {}),
     });
     return { booking, old, learnerName: learner.firstName };
   });
 
   const { booking, old } = result;
+  // Moving to a different instructor: let the original instructor know their lesson is off.
+  if (old && old.instructorId !== booking.instructorId && old.status !== 'cancelled') {
+    await notify(old.instructorId, {
+      type: 'booking_cancelled',
+      title: `Booking ${old.ref ?? ''} cancelled`.trim(),
+      body: `${result.learnerName} moved the lesson on ${when(old)} to another instructor.`,
+      link: `/instructor/bookings/${old.id}`,
+    });
+  }
   await notify(booking.instructorId, {
     type: 'booking_confirmed',
     title: old ? `Booking ${old.ref ?? ''} moved by ${result.learnerName}` : `New booking from ${result.learnerName}`,
@@ -337,6 +366,7 @@ export const proposeBooking = onCall(opts, async req => {
       price: lessonPrice(lessonType, pricingFor(instructor, learner)),
       paymentStatus: 'unpaid',
       proposedBy: 'instructor',
+      expiresAt: proposalExpiresAt(new Date(), startAt),
       rescheduledFrom: old?.id,
     };
     tx.set(bookingRef, {
@@ -355,8 +385,8 @@ export const proposeBooking = onCall(opts, async req => {
     type: 'proposal',
     title: old ? `${instructorName} rescheduled your lesson` : `${instructorName} proposed a lesson`,
     body: old
-      ? `Booking ${old.ref ?? ''} was cancelled and a new time was proposed: ${when(booking)}. Please accept or decline.`
-      : `${LESSON_TYPES[lessonType].label} on ${when(booking)}, pick up at ${pickupLocation}. Please accept or decline.`,
+      ? `Booking ${old.ref ?? ''} was cancelled and a new time was proposed: ${when(booking)}. Please accept or decline within ${PROPOSAL_EXPIRY_HOURS} hours.`
+      : `${LESSON_TYPES[lessonType].label} on ${when(booking)}, pick up at ${pickupLocation}. Please accept or decline within ${PROPOSAL_EXPIRY_HOURS} hours.`,
     link: `/learner/bookings/${booking.id}`,
   });
   return { bookingId: booking.id, ref: booking.ref };
@@ -373,6 +403,7 @@ export const respondToProposal = onCall(opts, async req => {
     const booking = bookingFrom(await tx.get(db.doc(`bookings/${bookingId}`)));
     if (!booking || booking.learnerId !== learnerId) fail('Booking not found.', 'not-found');
     if (booking.status !== 'proposed') fail('This proposal is no longer open.');
+    if (isExpiredProposal(booking)) fail(`This proposal has expired. Ask ${booking.instructorName ?? 'your instructor'} to propose a new time.`);
     const learner = userFrom(await tx.get(db.doc(`users/${learnerId}`)))!;
     const existing = accept ? await instructorBookings(tx, booking.instructorId) : [];
 

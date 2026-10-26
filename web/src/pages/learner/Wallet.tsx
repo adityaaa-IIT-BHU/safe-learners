@@ -1,32 +1,27 @@
 import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { ArrowDownLeft, ArrowUpRight, CreditCard, Mail, Wallet as WalletIcon } from 'lucide-react';
 import { useState } from 'react';
-import { CREDIT_PACKAGES, creditPackagePrice, pricingFor } from '@shared/domain';
+import { CREDIT_HOURLY_RATE, CREDIT_PACKAGES, creditPackagePrice, type CreditPackageId } from '@shared/domain';
 import { formatDate } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
-import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, Select, cx, formatMoney } from '@/components/ui';
-import { mapTransaction, useQuery, useUser } from '@/lib/data';
+import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, cx, formatMoney } from '@/components/ui';
+import { mapTransaction, useQuery } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { SUPPORT_EMAIL } from '../public/Layout';
-
-const CUSTOM_HOURS = [1, 2, 3, 4, 5, 7, 8, 9, 12, 15, 20];
 
 export function Wallet() {
   const me = useProfile();
   const { uid } = useAuth();
-  const { data: instructor } = useUser(me.instructorId);
   const { data: transactions } = useQuery(
     uid ? query(collection(db, 'users', uid, 'transactions'), orderBy('createdAt', 'desc'), limit(50)) : null,
     mapTransaction,
     `transactions:${uid}`,
   );
-  const [choice, setChoice] = useState<string>('10');
-  const [customHours, setCustomHours] = useState(3);
+  const [choice, setChoice] = useState<CreditPackageId>('package-10h');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
-  const rate = pricingFor(instructor, me).lesson;
-  const hours = choice === 'custom' ? customHours : Number(choice);
-  const quote = creditPackagePrice(hours, rate);
+  const quote = creditPackagePrice(choice);
+  const hours = quote.hours;
 
   return (
     <>
@@ -41,17 +36,17 @@ export function Wallet() {
           </Card>
 
           <Card>
-            <CardHeader title="Add lesson credit" subtitle={instructor ? `Based on ${instructor.firstName}’s rate of ${formatMoney(rate)}/hr` : `Based on the standard rate of ${formatMoney(rate)}/hr`} />
+            <CardHeader title="Add lesson credit" subtitle={`Choose a lesson or save with a package. Standard rate ${formatMoney(CREDIT_HOURLY_RATE)}/hr.`} />
             <div className="space-y-3 p-5">
-              {CREDIT_PACKAGES.map(p => (
-                <PackageOption key={p.hours} selected={choice === String(p.hours)} onSelect={() => setChoice(String(p.hours))}
-                  title={p.title} blurb={p.blurb} tag={`${p.discount * 100}% off`} />
-              ))}
-              <PackageOption selected={choice === 'custom'} onSelect={() => setChoice('custom')} title="Custom hours" blurb="Top up exactly what you need.">
-                <Select value={customHours} onChange={e => { setCustomHours(Number(e.target.value)); setChoice('custom'); }} onClick={e => e.stopPropagation()} aria-label="Hours" className="w-32">
-                  {CUSTOM_HOURS.map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
-                </Select>
-              </PackageOption>
+              {CREDIT_PACKAGES.map(p => {
+                const { discount } = creditPackagePrice(p.id);
+                return (
+                  <PackageOption key={p.id} selected={choice === p.id} onSelect={() => setChoice(p.id)}
+                    title={p.title} blurb={p.blurb} tag={discount > 0 ? `Save ${formatMoney(discount)}` : undefined}>
+                    <span className="text-lg font-extrabold">{formatMoney(p.price)}</span>
+                  </PackageOption>
+                );
+              })}
             </div>
           </Card>
         </div>

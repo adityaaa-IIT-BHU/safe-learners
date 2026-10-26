@@ -1,14 +1,24 @@
-import { ArrowRight, CalendarPlus, CarFront, Clock, History, Inbox, MapPin, Search, Wallet } from 'lucide-react';
+import { ArrowRight, CalendarPlus, CarFront, Clock, History, Inbox, MapPin, Search, Star, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LESSON_TYPES, displayRef, fullName, lessonPrice, pricingFor, type Booking } from '@shared/domain';
+import {
+  LESSON_TYPES,
+  PROPOSAL_EXPIRY_HOURS,
+  displayRef,
+  fullName,
+  isExpiredProposal,
+  learnerCanReview,
+  lessonPrice,
+  pricingFor,
+  type Booking,
+} from '@shared/domain';
 import { formatDate, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { AddToCalendarButton, BookingRow } from '@/components/booking';
-import { Avatar, Badge, ButtonLink, Card, CardHeader, EmptyState, Skeleton, Stat, Tabs, formatMoney } from '@/components/ui';
+import { Avatar, Badge, Button, ButtonLink, Card, CardHeader, EmptyState, Skeleton, Stat, Tabs, formatMoney } from '@/components/ui';
 import { useBookings, useUser } from '@/lib/data';
 import { greeting, timeUntil } from '@/lib/format';
-import { CancelButton, ProposalActions, RescheduleButton } from './actions';
+import { CancelButton, ProposalActions, RateButton, RescheduleButton, ReviewModal } from './actions';
 
 type Tab = 'upcoming' | 'history';
 
@@ -18,23 +28,30 @@ export function LearnerDashboard() {
   const { data: bookings, loading } = useBookings('learnerId', uid);
   const { data: instructor } = useUser(me.instructorId);
   const [tab, setTab] = useState<Tab>('upcoming');
+  const [reviewing, setReviewing] = useState<Booking | null>(null);
 
-  const { proposals, upcoming, history, next, hoursDone } = useMemo(() => {
+  const { proposals, upcoming, history, next, hoursDone, toReview } = useMemo(() => {
     const now = Date.now();
     const lessons = bookings.filter(b => b.kind === 'lesson');
     const future = lessons.filter(b => b.endAt.getTime() > now);
-    const proposals = future.filter(b => b.status === 'proposed');
+    const lapsed = (b: Booking) => isExpiredProposal(b);
+    const proposals = future.filter(b => b.status === 'proposed' && !lapsed(b));
     // Cancelled lessons stay visible (with Rebook) until they're replaced or their date passes.
     const upcoming = future.filter(b => ['confirmed', 'late_cancel_requested'].includes(b.status) || (b.status === 'cancelled' && !b.rescheduledTo));
     const history = lessons
-      .filter(b => !future.includes(b) || ['declined', 'withdrawn'].includes(b.status) || (b.status === 'cancelled' && b.rescheduledTo))
-      .filter(b => b.status !== 'proposed')
+      .filter(b => !future.includes(b) || ['declined', 'withdrawn', 'expired'].includes(b.status) || lapsed(b) || (b.status === 'cancelled' && b.rescheduledTo))
+      .filter(b => b.status !== 'proposed' || lapsed(b))
       .sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
     const next = upcoming.find(b => b.status === 'confirmed');
     const hoursDone = lessons
       .filter(b => b.status === 'completed' || (b.status === 'confirmed' && b.endAt.getTime() < now))
       .reduce((sum, b) => sum + (b.endAt.getTime() - b.startAt.getTime()) / 3_600_000, 0);
-    return { proposals, upcoming, history, next, hoursDone };
+    // Latest unrated lesson with each instructor.
+    const toReview: Booking[] = [];
+    for (const b of history) {
+      if (learnerCanReview(b) && !toReview.some(r => r.instructorId === b.instructorId)) toReview.push(b);
+    }
+    return { proposals, upcoming, history, next, hoursDone, toReview };
   }, [bookings]);
 
   return (
@@ -47,11 +64,33 @@ export function LearnerDashboard() {
       {proposals.length > 0 && (
         <section className="space-y-3">
           <h2 className="flex items-center gap-2 font-bold"><Inbox className="size-4" />Waiting for your answer</h2>
+          <p className="text-sm text-ink-500">Proposed lessons are held for {PROPOSAL_EXPIRY_HOURS} hours. If you don’t answer, the time is released.</p>
           {proposals.map(b => (
             <BookingRow key={b.id} booking={b} to={`/learner/bookings/${b.id}`} person={{ name: b.instructorName }} highlight actions={<ProposalActions booking={b} />} />
           ))}
         </section>
       )}
+
+      {toReview.length > 0 && (
+        <Card>
+          <CardHeader title="How were your lessons?" subtitle="A quick rating helps other learners find great instructors." />
+          <ul className="divide-y divide-ink-100 dark:divide-ink-800">
+            {toReview.map(b => (
+              <li key={b.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <Avatar name={b.instructorName} size={40} />
+                  <div className="min-w-0">
+                    <p className="font-bold">How was your lesson with {b.instructorName}?</p>
+                    <p className="text-sm text-ink-500">{LESSON_TYPES[b.lessonType ?? 'lesson-1h'].label} · {formatDate(b.startAt, b.timezone)}</p>
+                  </div>
+                </div>
+                <Button icon={<Star className="size-4" />} onClick={() => setReviewing(b)}>Leave feedback for {b.instructorName}</Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {reviewing && <ReviewModal booking={reviewing} open onClose={() => setReviewing(null)} />}
 
       <div className="grid grid-cols-1 gap-6 [&>*]:min-w-0 lg:grid-cols-[1fr_340px]">
         {loading ? <Skeleton className="h-56" /> : next ? <NextLessonCard booking={next} /> : <NoLessonCard hasInstructor={!!instructor} instructorId={instructor?.id} />}
@@ -98,7 +137,7 @@ export function LearnerDashboard() {
               </Card>
             )
           ) : history.length ? history.map(b => (
-            <BookingRow key={b.id} booking={b} to={`/learner/bookings/${b.id}`} person={{ name: b.instructorName }} actions={<RescheduleButton booking={b} />} />
+            <BookingRow key={b.id} booking={b} to={`/learner/bookings/${b.id}`} person={{ name: b.instructorName }} actions={<><RateButton booking={b} /><RescheduleButton booking={b} /></>} />
           )) : (
             <Card><EmptyState icon={<History className="size-6" />} title="No past bookings yet" body="Completed and cancelled lessons will appear here." /></Card>
           )}

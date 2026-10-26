@@ -74,6 +74,9 @@ export interface UserProfile {
   referredBy?: string;
   referralCount?: number;
   homeSuburb?: string;
+  /** Answers from the learner's latest booking, offered again next time. */
+  drivingExperience?: DrivingExperience;
+  testBooked?: boolean;
 
   // Instructor
   bio?: string;
@@ -252,16 +255,25 @@ export function priceChangeEffectiveAt(now: Date, timeZone: string = DEFAULT_TIM
 
 // ---------- Credit packages ----------
 
+/** Standard Safe Learners hourly rate that wallet credit packages are priced against. */
+export const CREDIT_HOURLY_RATE = 70;
+
+/** Wallet credit learners can buy. Fixed prices, the same whichever instructor they book. */
 export const CREDIT_PACKAGES = [
-  { hours: 10, discount: 0.1, title: '10 hours', blurb: 'Perfect for new learners starting their driving journey from scratch' },
-  { hours: 6, discount: 0.05, title: '6 hours', blurb: 'Ideal for new learners, overseas licence holders, or a skills refresh' },
+  { id: 'lesson-1h', hours: 1, price: 70, title: '1 hour lesson', blurb: 'Try a lesson, or top up for your next one' },
+  { id: 'lesson-1.5h', hours: 1.5, price: 100, title: '1.5 hour lesson', blurb: 'A longer drive to build confidence' },
+  { id: 'lesson-2h', hours: 2, price: 130, title: '2 hour lesson', blurb: 'Great for test routes and longer practice drives' },
+  { id: 'package-5h', hours: 5, price: 315, title: '5 hour package', blurb: 'Ideal for overseas licence holders or a skills refresh' },
+  { id: 'package-10h', hours: 10, price: 630, title: '10 hour package', blurb: 'Perfect for new learners starting their driving journey from scratch' },
 ] as const;
 
-export function creditPackagePrice(hours: number, hourlyRate: number): { gross: number; discount: number; total: number } {
-  const pkg = CREDIT_PACKAGES.find(p => p.hours === hours);
-  const gross = round2(hours * hourlyRate);
-  const discount = round2(gross * (pkg?.discount ?? 0));
-  return { gross, discount, total: round2(gross - discount) };
+export type CreditPackageId = (typeof CREDIT_PACKAGES)[number]['id'];
+
+/** Order summary for a credit package: value at the standard rate, saving, and price paid. */
+export function creditPackagePrice(id: CreditPackageId): { hours: number; gross: number; discount: number; total: number } {
+  const pkg = CREDIT_PACKAGES.find(p => p.id === id) ?? CREDIT_PACKAGES[0];
+  const gross = round2(pkg.hours * CREDIT_HOURLY_RATE);
+  return { hours: pkg.hours, gross, discount: round2(gross - pkg.price), total: pkg.price };
 }
 
 // ---------- Referrals ----------
@@ -278,7 +290,17 @@ export type BookingStatus =
   | 'cancelled'
   | 'completed'
   | 'declined' // learner declined a proposal
-  | 'withdrawn'; // instructor withdrew a proposal
+  | 'withdrawn' // instructor withdrew a proposal
+  | 'expired'; // learner didn't answer a proposal in time
+
+export type DrivingExperience = 'new' | 'some' | 'international';
+
+/** Questions learners answer when booking, so the instructor can plan the lesson. */
+export const DRIVING_EXPERIENCE: Record<DrivingExperience, string> = {
+  new: 'New learner',
+  some: 'Some experience',
+  international: 'International licence holder',
+};
 
 // events: instructor-only blocks (personal time / time off); open: extra open hours outside the weekly schedule
 export type BookingKind = 'lesson' | 'event' | 'open';
@@ -312,9 +334,13 @@ export interface Booking {
   dropoffLocation?: string;
   testLocation?: string;
   notes?: string;
+  experience?: DrivingExperience;
+  testBooked?: boolean;
   price?: number;
   paymentStatus?: PaymentStatus;
   proposedBy?: 'learner' | 'instructor';
+  /** Proposals only: when an unanswered proposal lapses and frees the time. */
+  expiresAt?: Date;
   cancelledBy?: 'learner' | 'instructor' | 'admin';
   cancellationReason?: string;
   rescheduledFrom?: string;
@@ -337,13 +363,48 @@ export const STATUS_META: Record<BookingStatus, { label: string; tone: 'green' |
   completed: { label: 'Completed', tone: 'blue' },
   declined: { label: 'Declined', tone: 'slate' },
   withdrawn: { label: 'Withdrawn', tone: 'slate' },
+  expired: { label: 'Expired', tone: 'slate' },
 };
 
 /** Statuses that occupy the instructor's time. */
 export const SLOT_HOLDING: BookingStatus[] = ['proposed', 'confirmed', 'late_cancel_requested'];
 
-export function holdsSlot(b: Pick<Booking, 'status' | 'kind'>): boolean {
-  return b.kind !== 'open' && SLOT_HOLDING.includes(b.status);
+/** Bookings that are over without going ahead (shown in history, never on the calendar). */
+export const CLOSED_STATUSES: BookingStatus[] = ['cancelled', 'declined', 'withdrawn', 'expired'];
+
+/** Learners have this long to accept an instructor's proposal. */
+export const PROPOSAL_EXPIRY_HOURS = 24;
+
+/** A proposal lapses after PROPOSAL_EXPIRY_HOURS, or when the lesson would start, whichever is first. */
+export function proposalExpiresAt(proposedAt: Date, startAt: Date): Date {
+  return new Date(Math.min(proposedAt.getTime() + PROPOSAL_EXPIRY_HOURS * 3_600_000, startAt.getTime()));
+}
+
+/** When a proposal lapses (older proposals without a stored expiry count from when they were made). */
+export function proposalExpiry(b: Pick<Booking, 'expiresAt' | 'createdAt' | 'startAt'>): Date {
+  return b.expiresAt ?? (b.createdAt ? proposalExpiresAt(b.createdAt, b.startAt) : b.startAt);
+}
+
+export function isExpiredProposal(b: Pick<Booking, 'status' | 'expiresAt' | 'createdAt' | 'startAt'>, now: Date = new Date()): boolean {
+  return b.status === 'proposed' && proposalExpiry(b).getTime() <= now.getTime();
+}
+
+export function holdsSlot(b: Pick<Booking, 'status' | 'kind' | 'expiresAt' | 'createdAt' | 'startAt'>, now: Date = new Date()): boolean {
+  return b.kind !== 'open' && SLOT_HOLDING.includes(b.status) && !isExpiredProposal(b, now);
+}
+
+/** A finished lesson the learner hasn't rated yet. */
+export function learnerCanReview(b: Pick<Booking, 'kind' | 'status' | 'reviewed' | 'endAt'>, now: Date = new Date()): boolean {
+  return b.kind === 'lesson' && !b.reviewed && (b.status === 'completed' || (b.status === 'confirmed' && b.endAt.getTime() < now.getTime()));
+}
+
+/**
+ * A pick up or drop off address that could be a real place, not just "12 Y".
+ * The booking form also makes learners pick the address from Google's suggestions.
+ */
+export function isPlausibleAddress(value: string): boolean {
+  const v = value.trim();
+  return v.length >= 8 && /[a-z]{3,}/i.test(v);
 }
 
 export function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
@@ -410,22 +471,26 @@ export const NEARBY_KM = 3;
 
 /**
  * Does an instructor cover a searched suburb or postcode?
- * Matches on postcode, on suburb name, or (when the search was located) on distance.
+ * Matches on postcode, on suburb name (any suburb sharing a searched postcode), or (when the search was located) on distance.
  */
 export function coversArea(
   u: Pick<UserProfile, 'serviceAreas' | 'servicedSuburbs'>,
   query: string,
-  located?: { lat: number; lng: number; postcode?: string; name?: string } | null,
+  located?: { lat: number; lng: number; postcode?: string; name?: string; localities?: string[] } | null,
 ): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   const areas = serviceAreasOf(u);
-  const postcode = /^\d{4}$/.test(q) ? q : located?.postcode;
-  const name = /^\d{4}$/.test(q) ? located?.name?.toLowerCase() : q.replace(/\s+(nsw|act|vic|qld|sa|wa|tas|nt)\b.*$/i, '').replace(/\s+\d{4}$/, '');
+  const isPostcode = /^\d{4}$/.test(q);
+  const postcode = isPostcode ? q : located?.postcode;
+  const names = (isPostcode
+    ? [located?.name, ...(located?.localities ?? [])]
+    : [q.replace(/\s+(nsw|act|vic|qld|sa|wa|tas|nt)\b.*$/i, '').replace(/\s+\d{4}$/, '')]
+  ).filter((n): n is string => !!n).map(n => n.toLowerCase());
   return areas.some(a => {
     const an = a.name.toLowerCase();
     if (postcode && (a.postcode === postcode || an === postcode)) return true;
-    if (name && (an === name || an.includes(name) || (name.length > 3 && name.includes(an)))) return true;
+    if (names.some(name => an === name || an.includes(name) || (name.length > 3 && name.includes(an)))) return true;
     if (located && a.lat !== undefined && a.lng !== undefined && distanceKm(located, { lat: a.lat, lng: a.lng }) <= NEARBY_KM) return true;
     return false;
   });
@@ -489,7 +554,9 @@ function subtractSpans(from: Span[], remove: Span[]): Span[] {
  * Free time = weekly hours (plus any extra open hours) minus busy time, where each busy block is
  * padded by the travel buffer. Starts step through each free gap and also include the start that
  * finishes exactly at the end of the gap. With smart scheduling, starts that would strand a gap
- * too short for another lesson (shorter than `smartGapMinutes` plus the travel buffer) are skipped.
+ * too short for another lesson (shorter than `smartGapMinutes` plus the travel buffer) next to an
+ * existing lesson or event are skipped. The start and end of the working day never count as
+ * stranding a gap, so a quiet day offers every start.
  */
 export function openSlotsForDay(opts: {
   day: string; // YYYY-MM-DD in the instructor's zone
@@ -530,10 +597,13 @@ export function openSlotsForDay(opts: {
     })),
     ...extraOpen.map(x => ({ start: Math.max(x.start.getTime(), dayStart), end: Math.min(x.end.getTime(), dayEnd) })),
   ]);
-  const free = subtractSpans(open, busy.map(b => ({
+  const padded = busy.map(b => ({
     start: b.start.getTime() - (b.bufferMinutes ?? bufferMinutes) * MIN,
     end: b.end.getTime() + (b.bufferMinutes ?? bufferMinutes) * MIN,
-  })));
+  }));
+  const free = subtractSpans(open, padded);
+  // Free-time edges that touch a lesson or event (rather than the start or end of working hours).
+  const busyEdges = new Set(padded.flatMap(p => [p.start, p.end]));
 
   const duration = durationMinutes * MIN;
   const earliest = now.getTime() + minNoticeMinutes * MIN;
@@ -551,7 +621,9 @@ export function openSlotsForDay(opts: {
         const after = f.end - (t + duration);
         // Lessons flush against either edge of the free window never strand a new gap there.
         const flush = before === 0 || after === 0;
-        if (!flush && (before < gap || after < gap)) continue;
+        const strandsBefore = busyEdges.has(f.start) && before < gap;
+        const strandsAfter = busyEdges.has(f.end) && after < gap;
+        if (!flush && (strandsBefore || strandsAfter)) continue;
       }
       starts.add(t);
     }
@@ -691,9 +763,12 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     dropoffLocation: raw.dropoffLocation,
     testLocation: raw.testLocation,
     notes: raw.notes,
+    experience: raw.experience in DRIVING_EXPERIENCE ? raw.experience : undefined,
+    testBooked: typeof raw.testBooked === 'boolean' ? raw.testBooked : undefined,
     price: typeof raw.price === 'number' ? raw.price : undefined,
     paymentStatus: raw.paymentStatus ?? (raw.status === 'CANCELLED_CHARGED' ? 'charged' : undefined),
     proposedBy: raw.proposedBy,
+    expiresAt: toDate(raw.expiresAt),
     cancelledBy: raw.cancelledBy,
     cancellationReason: raw.cancellationReason,
     rescheduledFrom: raw.rescheduledFrom,

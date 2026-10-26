@@ -1,15 +1,12 @@
-import { ArrowLeft, CarFront, Clock, MapPin, Phone, Star, StickyNote } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, CarFront, Clock, GraduationCap, MapPin, Phone, Star, StickyNote } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
-import { LESSON_TYPES, displayRef, fullName, type Booking } from '@shared/domain';
-import { formatDate, formatTimeRange } from '@shared/time';
+import { DRIVING_EXPERIENCE, LESSON_TYPES, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isExpiredProposal, learnerCanReview, proposalExpiry, type Booking } from '@shared/domain';
+import { formatDate, formatTime, formatTimeRange } from '@shared/time';
 import { useAuth } from '@/auth/AuthProvider';
 import { AddToCalendarButton, BookingTimeline, PaymentBadge, StatusBadge } from '@/components/booking';
-import { Avatar, Button, ButtonLink, Card, CardHeader, EmptyState, Modal, PageHeader, PageLoader, Textarea, formatMoney } from '@/components/ui';
-import { api, errorMessage } from '@/lib/api';
+import { Avatar, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, PageLoader, formatMoney } from '@/components/ui';
 import { useBooking, useUser } from '@/lib/data';
-import { CancelButton, ProposalActions, RescheduleButton } from './actions';
+import { CancelButton, ProposalActions, RescheduleButton, ReviewModal } from './actions';
 
 export function LearnerBookingDetail() {
   const { id } = useParams();
@@ -23,7 +20,7 @@ export function LearnerBookingDetail() {
     return <Card><EmptyState title="Booking not found" action={<ButtonLink to="/learner">Back to dashboard</ButtonLink>} /></Card>;
   }
 
-  const canReview = !booking.reviewed && (booking.status === 'completed' || (booking.status === 'confirmed' && booking.endAt.getTime() < Date.now()));
+  const canReview = learnerCanReview(booking);
 
   return (
     <>
@@ -32,7 +29,7 @@ export function LearnerBookingDetail() {
         title={<span className="flex flex-wrap items-center gap-3">Booking <span className="font-mono">{displayRef(booking)}</span> <StatusBadge booking={booking} /></span>}
         actions={
           <>
-            {booking.status === 'proposed' && <ProposalActions booking={booking} size="md" />}
+            {booking.status === 'proposed' && !isExpiredProposal(booking) && <ProposalActions booking={booking} size="md" />}
             <RescheduleButton booking={booking} size="md" />
             {canReview && <Button icon={<Star className="size-4" />} onClick={() => setParams({ review: '1' })}>Rate lesson</Button>}
             <CancelButton booking={booking} size="md" />
@@ -53,7 +50,8 @@ export function LearnerBookingDetail() {
               <Detail icon={<MapPin className="size-4" />} label="Pick up">{booking.pickupLocation || '—'}</Detail>
               {booking.dropoffLocation && booking.dropoffLocation !== booking.pickupLocation && <Detail icon={<MapPin className="size-4" />} label="Drop off">{booking.dropoffLocation}</Detail>}
               {booking.testLocation && <Detail icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}</Detail>}
-              {booking.notes && <Detail icon={<StickyNote className="size-4" />} label="Your notes">{booking.notes}</Detail>}
+              {booking.experience && <Detail icon={<GraduationCap className="size-4" />} label="Your experience">{DRIVING_EXPERIENCE[booking.experience]}{booking.testBooked !== undefined && <><br />Driving test {booking.testBooked ? 'booked' : 'not booked yet'}</>}</Detail>}
+              {booking.notes && <Detail icon={<StickyNote className="size-4" />} label="To work on">{booking.notes}</Detail>}
             </dl>
             {['confirmed', 'proposed'].includes(booking.status) && (
               <div className="border-t border-ink-100 px-5 py-4 dark:border-ink-800"><AddToCalendarButton booking={booking} withName={booking.instructorName} /></div>
@@ -102,8 +100,11 @@ export function LearnerBookingDetail() {
 }
 
 function StatusExplainer({ booking: b }: { booking: Booking }) {
+  const expiry = proposalExpiry(b);
+  const lapsed = isExpiredProposal(b);
   const messages: Partial<Record<Booking['status'], string>> = {
-    proposed: `${b.instructorName} proposed this time. Accept to confirm it, or decline if it doesn’t suit.`,
+    proposed: lapsed ? `This proposal expired because it wasn’t answered within ${PROPOSAL_EXPIRY_HOURS} hours. You can book a new time with ${b.instructorName} any time.` :`${b.instructorName} proposed this time. Accept to confirm it, or decline if it doesn’t suit. Please answer by ${formatDate(expiry, b.timezone)} at ${formatTime(expiry, b.timezone)} — after that the time is released.`,
+    expired: `This proposal expired because it wasn’t answered within ${PROPOSAL_EXPIRY_HOURS} hours. You can book a new time with ${b.instructorName} any time.`,
     late_cancel_requested: `You asked to cancel inside 24 hours. ${b.instructorName} will decide whether a fee applies — you’ll be notified.`,
     cancelled: b.rescheduledTo ? 'This lesson was moved to a new time.' : 'This lesson was cancelled. You can rebook a new time any time.',
   };
@@ -137,39 +138,3 @@ function Detail({ icon, label, children }: { icon: React.ReactNode; label: strin
   );
 }
 
-function ReviewModal({ booking, open, onClose }: { booking: Booking; open: boolean; onClose: () => void }) {
-  const [rating, setRating] = useState(0);
-  const [hover, setHover] = useState(0);
-  const [comment, setComment] = useState('');
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setRating(0); setComment(''); } }, [open]);
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={`Rate your lesson with ${booking.instructorName}`}
-      footer={<Button disabled={!rating} loading={busy} onClick={async () => {
-        setBusy(true);
-        try {
-          await api.submitReview({ bookingId: booking.id, rating, comment: comment.trim() || undefined });
-          toast.success('Thanks for your review!');
-          onClose();
-        } catch (err) {
-          toast.error(errorMessage(err));
-        } finally {
-          setBusy(false);
-        }
-      }}>Submit review</Button>}
-    >
-      <div className="flex justify-center gap-2 py-2" onMouseLeave={() => setHover(0)}>
-        {[1, 2, 3, 4, 5].map(n => (
-          <button key={n} type="button" onClick={() => setRating(n)} onMouseEnter={() => setHover(n)} aria-label={`${n} star${n > 1 ? 's' : ''}`}>
-            <Star className={`size-10 transition ${(hover || rating) >= n ? 'fill-brand-500 text-brand-500' : 'text-ink-200 dark:text-ink-700'}`} />
-          </button>
-        ))}
-      </div>
-      <Textarea wrapperClassName="mt-4" label="Tell other learners about it (optional)" value={comment} onChange={e => setComment(e.target.value)} placeholder="What went well? What could be better?" />
-      <p className="mt-2 text-xs text-ink-500">Reviews are public on {booking.instructorName}’s profile.</p>
-    </Modal>
-  );
-}

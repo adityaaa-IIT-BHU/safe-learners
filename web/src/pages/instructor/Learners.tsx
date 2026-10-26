@@ -1,7 +1,7 @@
 import { ArrowLeft, Mail, Phone, Search, Send, UserPlus, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fullName, type Booking } from '@shared/domain';
+import { CLOSED_STATUSES, fullName, isExpiredProposal, type Booking } from '@shared/domain';
 import { useAuth } from '@/auth/AuthProvider';
 import { BookingRow } from '@/components/booking';
 import { Avatar, Badge, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, PageLoader, Skeleton, Stat } from '@/components/ui';
@@ -16,7 +16,7 @@ function statsFor(learnerId: string, bookings: Booking[]) {
   return {
     hours: done.reduce((s, b) => s + (b.endAt.getTime() - b.startAt.getTime()) / 3_600_000, 0),
     upcoming: mine.filter(b => b.status === 'confirmed' && b.startAt.getTime() > now).length,
-    proposals: mine.filter(b => b.status === 'proposed' && b.startAt.getTime() > now).length,
+    proposals: mine.filter(b => b.status === 'proposed' && b.startAt.getTime() > now && !isExpiredProposal(b)).length,
     last: done.at(-1),
     all: mine,
   };
@@ -98,7 +98,7 @@ export function LearnerDetail() {
           <div className="grid gap-4 sm:grid-cols-3">
             <Stat label="Hours completed" value={s.hours % 1 ? s.hours.toFixed(1) : s.hours} />
             <Stat label="Upcoming" value={s.upcoming} />
-            <Stat label="Lessons booked" value={s.all.filter(b => !['declined', 'withdrawn'].includes(b.status)).length} />
+            <Stat label="Lessons booked" value={s.all.filter(b => !CLOSED_STATUSES.includes(b.status) || b.status === 'cancelled').length} />
           </div>
           <section className="space-y-3">
             <h2 className="font-bold">Lessons</h2>

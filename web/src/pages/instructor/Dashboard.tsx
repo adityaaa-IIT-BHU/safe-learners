@@ -1,7 +1,7 @@
 import { AlertTriangle, BadgeCheck, CalendarClock, CalendarPlus, ChartColumn, Clock, Inbox, Lock, Send, Star, UserPlus, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PLATFORM_FEE_RATE, hasAnyHours, type Booking } from '@shared/domain';
+import { CLOSED_STATUSES, PLATFORM_FEE_RATE, hasAnyHours, isExpiredProposal, type Booking } from '@shared/domain';
 import { DEFAULT_TIMEZONE, dayKey, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { BookingRow, lessonLabel } from '@/components/booking';
@@ -29,10 +29,10 @@ export function InstructorDashboard() {
     const done = (b: Booking) => b.status === 'completed' || (b.status === 'confirmed' && b.endAt.getTime() < now);
     return {
       lateCancels: lessons.filter(b => b.status === 'late_cancel_requested'),
-      proposals: lessons.filter(b => b.status === 'proposed' && b.endAt.getTime() > now),
+      proposals: lessons.filter(b => b.status === 'proposed' && b.endAt.getTime() > now && !isExpiredProposal(b)),
       upcoming: lessons.filter(b => ['confirmed', 'late_cancel_requested'].includes(b.status) && b.endAt.getTime() > now),
-      history: lessons.filter(b => b.endAt.getTime() <= now || ['cancelled', 'declined', 'withdrawn'].includes(b.status)).filter(b => b.status !== 'proposed').reverse(),
-      todays: bookings.filter(b => dayKey(b.startAt, tz) === today && ['confirmed', 'late_cancel_requested', 'proposed'].includes(b.status)),
+      history: lessons.filter(b => b.endAt.getTime() <= now || CLOSED_STATUSES.includes(b.status) || isExpiredProposal(b)).filter(b => b.status !== 'proposed' || isExpiredProposal(b)).reverse(),
+      todays: bookings.filter(b => dayKey(b.startAt, tz) === today && ['confirmed', 'late_cancel_requested', 'proposed'].includes(b.status) && !isExpiredProposal(b)),
       monthEarnings: lessons.filter(b => done(b) && b.startAt >= monthStart).reduce((s, b) => s + (b.price ?? 0) * (1 - PLATFORM_FEE_RATE), 0),
       learners: new Set(lessons.map(b => b.learnerId).filter(Boolean)).size,
     };

@@ -2,7 +2,7 @@ import { ArrowLeft, RefreshCw, Send, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { LESSON_TYPES, LESSON_TYPE_ORDER, displayRef, fullName, isPrivateLearner, lessonPrice, pricingFor, type LessonType } from '@shared/domain';
+import { LESSON_TYPES, LESSON_TYPE_ORDER, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isPrivateLearner, lessonPrice, pricingFor, type LessonType } from '@shared/domain';
 import { DEFAULT_TIMEZONE, atLocalTime, dayKey, formatDate, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { SlotPicker } from '@/components/booking';
@@ -82,7 +82,7 @@ export function Propose() {
       <PageHeader
         back={<Link to={rescheduleId ? `/instructor/bookings/${rescheduleId}` : '/instructor'} className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-500 hover:text-ink-900 dark:hover:text-white"><ArrowLeft className="size-4" />Back</Link>}
         title={rescheduleId ? 'Reschedule booking' : 'Propose a lesson'}
-        subtitle={rescheduleId ? 'The current booking is cancelled and the learner gets the new time to accept or decline.' : 'The learner is notified and can accept or decline. The time is held for them until they respond.'}
+        subtitle={rescheduleId ? 'The current booking is cancelled and the learner gets the new time to accept or decline.' : `The learner is notified and can accept or decline. The time is held for ${PROPOSAL_EXPIRY_HOURS} hours (or until the lesson starts); if they don’t answer, it expires and the time is free again.`}
       />
 
       {rescheduleId && original && (

@@ -1,8 +1,8 @@
 import { CarFront, MapPin, Search, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { coversArea, fullName, pricingOf, serviceAreasOf, type ServiceArea, type UserProfile } from '@shared/domain';
-import { geocodeArea } from '@/lib/maps';
+import { coversArea, fullName, pricingOf, serviceAreasOf, type UserProfile } from '@shared/domain';
+import { geocodeArea, type LocatedArea } from '@/lib/maps';
 import { useAuth } from '@/auth/AuthProvider';
 import { Avatar, Badge, ButtonLink, Card, EmptyState, PageHeader, Select, Skeleton, Stars, formatMoney } from '@/components/ui';
 import { useVerifiedInstructors } from '@/lib/data';
@@ -10,9 +10,15 @@ import { PublicLayout } from './Layout';
 
 type Sort = 'recommended' | 'price' | 'rating';
 
-export function bookPath(instructorId: string, signedInLearner: boolean): string {
-  const target = `/learner/book/${instructorId}`;
+export function bookPath(instructorId: string, signedInLearner: boolean, rescheduleQuery = ''): string {
+  const target = `/learner/book/${instructorId}${rescheduleQuery}`;
   return signedInLearner ? target : `/login?next=${encodeURIComponent(target)}`;
+}
+
+/** "Schofields" or "Schofields, Colebee and 3 more" for the suburbs sharing a searched postcode. */
+function suburbsLabel(area: LocatedArea): string {
+  const names = area.localities?.length ? area.localities : [area.name];
+  return names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', ');
 }
 
 export function FindInstructors({ embedded }: { embedded?: boolean }) {
@@ -22,8 +28,11 @@ export function FindInstructors({ embedded }: { embedded?: boolean }) {
   const { profile } = useAuth();
   const { data: instructors, loading } = useVerifiedInstructors();
   const q = params.get('q') ?? '';
+  // Switching instructor for an existing booking: the new booking replaces it.
+  const reschedule = embedded ? params.get('reschedule') : null;
+  const rescheduleQuery = reschedule ? `?reschedule=${encodeURIComponent(reschedule)}${params.get('type') ? `&type=${encodeURIComponent(params.get('type')!)}` : ''}` : '';
   // Locate the search (suburb or postcode) so nearby instructors and postcode areas match too.
-  const [located, setLocated] = useState<ServiceArea | null>(null);
+  const [located, setLocated] = useState<LocatedArea | null>(null);
   useEffect(() => {
     setLocated(null);
     if (!q.trim()) return;
@@ -35,7 +44,7 @@ export function FindInstructors({ embedded }: { embedded?: boolean }) {
   const results = useMemo(() => {
     const list = instructors
       .filter(i => i.accountStatus !== 'disabled')
-      .filter(i => coversArea(i, q, located && located.lat !== undefined ? { lat: located.lat, lng: located.lng!, postcode: located.postcode, name: located.name } : null))
+      .filter(i => coversArea(i, q, located && located.lat !== undefined ? { lat: located.lat, lng: located.lng!, postcode: located.postcode, name: located.name, localities: located.localities } : null))
       .filter(i => transmission === 'any' || (i.transmission ?? 'Auto').includes(transmission));
     const score = (i: UserProfile) => (i.ratingAvg ?? 4) * Math.log2(2 + (i.ratingCount ?? 0));
     return list.sort((a, b) =>
@@ -50,9 +59,14 @@ export function FindInstructors({ embedded }: { embedded?: boolean }) {
   const content = (
     <>
       <PageHeader
-        title={q ? `Instructors covering ${located && located.name !== q ? `${q} (${located.name})` : `“${q}”`}` : 'Find a driving instructor'}
+        title={q ? `Instructors covering ${located && located.name !== q ? `${q} (${suburbsLabel(located)})` : `“${q}”`}` : 'Find a driving instructor'}
         subtitle="Every instructor is verified. Prices are per hour; the test package includes the car on test day."
       />
+      {reschedule && (
+        <div className="mb-6 rounded-2xl bg-sky-50 p-4 text-sm text-sky-900 dark:bg-sky-500/10 dark:text-sky-200">
+          Choose a new instructor and time. Your current lesson stays booked until you confirm the new one, then it’s cancelled automatically.
+        </div>
+      )}
       <Card className="mb-6 grid gap-3 p-4 sm:grid-cols-[1fr_auto_auto]">
         <form
           onSubmit={e => {
@@ -91,7 +105,7 @@ export function FindInstructors({ embedded }: { embedded?: boolean }) {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {results.map(i => <InstructorCard key={i.id} instructor={i} profileLink={`${base}/${i.id}`} bookLink={bookPath(i.id, isLearner)} isMine={profile?.instructorId === i.id} />)}
+          {results.map(i => <InstructorCard key={i.id} instructor={i} profileLink={`${base}/${i.id}`} bookLink={bookPath(i.id, isLearner, rescheduleQuery)} isMine={profile?.instructorId === i.id} />)}
         </div>
       )}
     </>

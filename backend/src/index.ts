@@ -26,6 +26,6 @@ export {
   submitReview,
   submitVerification,
 } from './accounts';
-export { applyPriceChanges, completeLessons, lessonReminders } from './scheduled';
+export { applyPriceChanges, completeLessons, expireProposals, lessonReminders } from './scheduled';
 export { reviewDocument, scanDocument, submitDocument } from './documents';
 export { setReviewHidden } from './reviews';
