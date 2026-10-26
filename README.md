@@ -38,7 +38,8 @@ cd backend && npm install && npm run build && cd ..
 cd web && npm install && cd ..
 
 # Terminal 1 — Auth, Firestore, Functions and Storage emulators (demo project, never touches production)
-firebase emulators:start --config firebase.emulator.json --project demo-safelearners
+# The longer discovery timeout is needed for the functions emulator to load the backend.
+FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase emulators:start --config firebase.emulator.json --project demo-safelearners
 
 # Terminal 2 — web app against the emulators
 cd web && VITE_USE_EMULATORS=true npm run dev
