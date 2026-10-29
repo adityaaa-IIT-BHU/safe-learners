@@ -2,9 +2,10 @@ import { ArrowLeft, CalendarPlus, CalendarX2, Lock, Trash2 } from 'lucide-react'
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import type { Booking } from '@shared/domain';
+import { serviceAreasOf, type Booking, type ServiceArea } from '@shared/domain';
 import { addDaysToKey, atLocalTime, dayKey, formatDate, formatTimeRange, startOfDayKey } from '@shared/time';
-import { useAuth } from '@/auth/AuthProvider';
+import { useAuth, useProfile } from '@/auth/AuthProvider';
+import { AreaPicker } from '@/components/AreaPicker';
 import { Badge, Button, Card, CardHeader, Input, Modal, PageHeader, Textarea } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatHHmm } from './actions';
@@ -12,7 +13,9 @@ import { formatHHmm } from './actions';
 /** Personal events, time off and extra open hours: view, edit and delete. */
 export function EventDetail({ booking: b }: { booking: Booking }) {
   const { readOnly } = useAuth();
+  const me = useProfile();
   const navigate = useNavigate();
+  const [area, setArea] = useState<ServiceArea | undefined>(b.area);
   const tz = b.timezone;
   const allDay = formatHHmm(b.startAt, tz) === '00:00' && formatHHmm(b.endAt, tz) === '00:00';
   const isOpen = b.kind === 'open';
@@ -37,7 +40,7 @@ export function EventDetail({ booking: b }: { booking: Booking }) {
     if (endAt <= startAt) return toast.error('The end must be after the start.');
     setSaving(true);
     try {
-      await api.updateEvent({ bookingId: b.id, title: title.trim() || undefined, startAt: startAt.toISOString(), endAt: endAt.toISOString(), location: location.trim() || undefined, notes: notes.trim() || undefined, applyBuffer });
+      await api.updateEvent({ bookingId: b.id, title: title.trim() || undefined, startAt: startAt.toISOString(), endAt: endAt.toISOString(), location: location.trim() || undefined, notes: notes.trim() || undefined, applyBuffer, ...(isOpen && area ? { area } : {}) });
       toast.success('Saved');
     } catch (err) {
       toast.error(errorMessage(err));
@@ -67,7 +70,7 @@ export function EventDetail({ booking: b }: { booking: Booking }) {
         actions={!readOnly && <Button variant="ghost" icon={<Trash2 className="size-4" />} className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10" onClick={() => setConfirmDelete(true)}>Delete</Button>}
       />
       <Card className="max-w-2xl">
-        <CardHeader title="Details" subtitle={isOpen ? 'Learners can book lessons inside these hours.' : 'Learners can’t book over this time.'} />
+        <CardHeader title="Details" subtitle={isOpen ? (b.area ? `Learners with a pick up in ${b.area.name} can book lessons inside these hours.` : 'Learners can book lessons inside these hours.') : 'Learners can’t book over this time.'} />
         <div className="grid gap-4 p-5 sm:grid-cols-3">
           {!isOpen && <Input label="Title" value={title} onChange={e => setTitle(e.target.value)} wrapperClassName="sm:col-span-3" disabled={readOnly} />}
           {allDay ? (
@@ -82,6 +85,7 @@ export function EventDetail({ booking: b }: { booking: Booking }) {
               <Input label="To" type="time" step={900} value={to} onChange={e => setTo(e.target.value)} disabled={readOnly} />
             </>
           )}
+          {isOpen && <div className="sm:col-span-3"><AreaPicker areas={serviceAreasOf(me)} value={area} onChange={setArea} disabled={readOnly} /></div>}
           {b.kind === 'event' && !allDay && (
             <>
               <Input label="Address (optional)" value={location} onChange={e => setLocation(e.target.value)} wrapperClassName="sm:col-span-3" disabled={readOnly} />

@@ -64,7 +64,7 @@ export function FindInstructors({ embedded }: { embedded?: boolean }) {
       />
       {reschedule && (
         <div className="mb-6 rounded-2xl bg-sky-50 p-4 text-sm text-sky-900 dark:bg-sky-500/10 dark:text-sky-200">
-          Choose a new instructor and time. Your current lesson stays booked until you confirm the new one, then it’s cancelled automatically.
+          Choose a new instructor and time. If your original lesson is still booked, it stays in place until you confirm the new one and is then cancelled automatically.
         </div>
       )}
       <Card className="mb-6 grid gap-3 p-4 sm:grid-cols-[1fr_auto_auto]">

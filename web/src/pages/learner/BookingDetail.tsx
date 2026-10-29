@@ -49,7 +49,7 @@ export function LearnerBookingDetail() {
               </Detail>
               <Detail icon={<MapPin className="size-4" />} label="Pick up">{booking.pickupLocation || '—'}</Detail>
               {booking.dropoffLocation && booking.dropoffLocation !== booking.pickupLocation && <Detail icon={<MapPin className="size-4" />} label="Drop off">{booking.dropoffLocation}</Detail>}
-              {booking.testLocation && <Detail icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}</Detail>}
+              {booking.testLocation && <Detail icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}{booking.testLocationAddress && <span className="block text-sm font-normal text-ink-500">{booking.testLocationAddress}</span>}</Detail>}
               {booking.experience && <Detail icon={<GraduationCap className="size-4" />} label="Your experience">{DRIVING_EXPERIENCE[booking.experience]}{booking.testBooked !== undefined && <><br />Driving test {booking.testBooked ? 'booked' : 'not booked yet'}</>}</Detail>}
               {booking.notes && <Detail icon={<StickyNote className="size-4" />} label="To work on">{booking.notes}</Detail>}
             </dl>

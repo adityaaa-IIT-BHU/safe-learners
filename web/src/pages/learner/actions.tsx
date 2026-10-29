@@ -86,6 +86,13 @@ export function RescheduleButton({ booking, size = 'sm' }: { booking: Booking; s
   );
 }
 
+/** For a lesson the instructor cancelled: rebook it with someone else. */
+export function SwitchInstructorButton({ booking, size = 'sm' }: { booking: Booking; size?: 'sm' | 'md' }) {
+  const { readOnly } = useAuth();
+  if (readOnly || !learnerCanReschedule(booking)) return null;
+  return <ButtonLink to={switchInstructorPath(booking)} size={size} variant="secondary"><UserRoundSearch className="size-4" /> Different instructor</ButtonLink>;
+}
+
 function ChangeOption({ to, icon, title, body }: { to: string; icon: React.ReactNode; title: string; body: string }) {
   return (
     <Link to={to} className="flex items-center gap-4 rounded-2xl border-2 border-ink-200 p-4 transition hover:border-ink-400 dark:border-ink-700 dark:hover:border-ink-500">

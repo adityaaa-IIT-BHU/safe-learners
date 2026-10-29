@@ -1,5 +1,5 @@
 import { CalendarPlus, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LESSON_TYPES,
@@ -8,6 +8,7 @@ import {
   isExpiredProposal,
   type Booking,
   type LessonType,
+  type PlaceInput,
 } from '@shared/domain';
 import { DEFAULT_TIMEZONE, addDaysToKey, dayKey, formatDate, formatInZone, formatTime, formatTimeRange, startOfDayKey } from '@shared/time';
 import { api, errorMessage } from '@/lib/api';
@@ -107,6 +108,10 @@ export function BookingTimeline({ booking }: { booking: Booking }) {
 
 // ---------- Add to calendar ----------
 
+function icsText(s: string) {
+  return s.replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
+}
+
 function icsDate(d: Date) {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
@@ -123,7 +128,8 @@ export function downloadIcs(booking: Booking, withName?: string) {
     `DTSTART:${icsDate(booking.startAt)}`,
     `DTEND:${icsDate(booking.endAt)}`,
     `SUMMARY:${title} (${displayRef(booking)})`,
-    booking.pickupLocation ? `LOCATION:${booking.pickupLocation.replace(/,/g, '\\,')}` : '',
+    booking.pickupLocation ? `LOCATION:${icsText(booking.pickupLocation)}` : '',
+    booking.testLocation ? `DESCRIPTION:${icsText(`Test centre: ${[booking.testLocation, booking.testLocationAddress].filter(Boolean).join(', ')}`)}` : '',
     'BEGIN:VALARM',
     'TRIGGER:-PT1H',
     'ACTION:DISPLAY',
@@ -150,32 +156,43 @@ export function AddToCalendarButton({ booking, withName }: { booking: Booking; w
 
 // ---------- Slot picker (live availability from the server) ----------
 
-export function SlotPicker({ instructorId, lessonType, value, onChange, excludeBookingId }: {
+export type Availability = Awaited<ReturnType<typeof api.getAvailability>>;
+
+export function SlotPicker({ instructorId, lessonType, value, onChange, excludeBookingId, pickup, onLoaded }: {
   instructorId: string;
   lessonType: LessonType;
   value: string | null; // ISO start
   onChange: (iso: string | null) => void;
   excludeBookingId?: string;
+  /** Known pick up address: unlocks extra hours the instructor opened for that suburb. */
+  pickup?: PlaceInput | null;
+  onLoaded?: (availability: Availability) => void;
 }) {
-  const [data, setData] = useState<{ timezone: string; slots: Record<string, string[]>; maxAdvanceDays?: number } | null>(null);
+  const [data, setData] = useState<Availability | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+  const pickupKey = pickup ? `${pickup.address}|${pickup.lat ?? ''}|${pickup.lng ?? ''}` : '';
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
     setError(null);
-    api.getAvailability({ instructorId, lessonType, days: 121, excludeBookingId })
+    api.getAvailability({ instructorId, lessonType, days: 121, excludeBookingId, ...(pickup ? { pickup } : {}) })
       .then(res => {
         if (cancelled) return;
         setData(res);
+        onLoadedRef.current?.(res);
         const first = Object.keys(res.slots).sort()[0] ?? null;
         setSelectedDay(d => (d && res.slots[d] ? d : first));
       })
       .catch(err => !cancelled && setError(errorMessage(err)));
     return () => { cancelled = true; };
-  }, [instructorId, lessonType, excludeBookingId]);
+  }, [instructorId, lessonType, excludeBookingId, pickupKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Changing the lesson length starts the picker afresh.
+  useEffect(() => { setData(null); }, [instructorId, lessonType]);
 
   // A selected start that no longer exists for this lesson length is cleared.
   useEffect(() => {
@@ -199,11 +216,17 @@ export function SlotPicker({ instructorId, lessonType, value, onChange, excludeB
   }
 
   const totalDays = Object.keys(data.slots).length;
+  const notes = <AvailabilityNotes data={data} tz={data.timezone} pickupGiven={!!pickup} />;
   if (!totalDays) {
     return (
-      <p className="rounded-xl bg-ink-100 p-4 text-sm text-ink-600 dark:bg-ink-800 dark:text-ink-300">
-        No free times in the next {data.maxAdvanceDays ?? 28} days for this lesson length. Try a shorter lesson or check back soon.
-      </p>
+      <div className="space-y-3">
+        <p className="rounded-xl bg-ink-100 p-4 text-sm text-ink-600 dark:bg-ink-800 dark:text-ink-300">
+          {data.pickupCovered === false
+            ? 'There are no times for this pick up address — it’s outside the instructor’s suburbs and they haven’t opened extra hours there.'
+            : `No free times in the next ${data.maxAdvanceDays ?? 28} days for this lesson length. Try a shorter lesson or check back soon.`}
+        </p>
+        {notes}
+      </div>
     );
   }
   // Weeks the learner can page through: up to the last day with a free slot.
@@ -273,7 +296,37 @@ export function SlotPicker({ instructorId, lessonType, value, onChange, excludeB
           ) : <p className="text-sm text-ink-500">No free times on this day.</p>}
         </div>
       )}
+      {notes}
       <p className="text-xs text-ink-400">Times shown in {tz.replace('_', ' ').split('/')[1]} time.</p>
+    </div>
+  );
+}
+
+/** Explains smart scheduling and any extra hours opened for a particular suburb. */
+function AvailabilityNotes({ data, tz, pickupGiven }: { data: Availability; tz: string; pickupGiven: boolean }) {
+  const areaHours = data.areaHours ?? [];
+  if (!data.smartScheduling && !areaHours.length) return null;
+  return (
+    <div className="space-y-2">
+      {!!data.smartScheduling && (
+        <p className="flex gap-2 rounded-xl bg-ink-50 p-3 text-xs text-ink-600 dark:bg-ink-800/60 dark:text-ink-300">
+          <Clock className="mt-px size-3.5 shrink-0" />
+          Times are grouped into lesson blocks so the instructor’s day has no awkward gaps.
+        </p>
+      )}
+      {areaHours.length > 0 && (
+        <div className="flex gap-2 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <MapPin className="mt-px size-3.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Extra hours in specific suburbs{pickupGiven ? '' : ' — enter a pick up address there to see these times'}:</p>
+            <ul className="mt-1 space-y-0.5">
+              {areaHours.slice(0, 5).map(h => (
+                <li key={h.start}>{formatDate(new Date(h.start), tz)}, {formatTimeRange(new Date(h.start), new Date(h.end), tz)} · {h.area.name}{h.area.postcode ? ` ${h.area.postcode}` : ''}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

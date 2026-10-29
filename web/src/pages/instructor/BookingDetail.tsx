@@ -73,7 +73,7 @@ export function InstructorBookingDetail() {
               <Info icon={<Clock className="size-4" />} label="When">{formatDate(booking.startAt, booking.timezone)}<br />{formatTimeRange(booking.startAt, booking.endAt, booking.timezone)}</Info>
               {booking.pickupLocation && <Info icon={<MapPin className="size-4" />} label="Pick up">{booking.pickupLocation}</Info>}
               {booking.dropoffLocation && booking.dropoffLocation !== booking.pickupLocation && <Info icon={<MapPin className="size-4" />} label="Drop off">{booking.dropoffLocation}</Info>}
-              {booking.testLocation && <Info icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}</Info>}
+              {booking.testLocation && <Info icon={<CarFront className="size-4" />} label="Test centre">{booking.testLocation}{booking.testLocationAddress && <span className="block text-sm font-normal text-ink-500">{booking.testLocationAddress}</span>}</Info>}
               {booking.experience && <Info icon={<GraduationCap className="size-4" />} label="Driving experience">{DRIVING_EXPERIENCE[booking.experience]}</Info>}
               {booking.testBooked !== undefined && <Info icon={<CalendarCheck className="size-4" />} label="Driving test booked?">{booking.testBooked ? 'Yes' : 'No'}</Info>}
               {booking.notes && <Info icon={<StickyNote className="size-4" />} label={booking.experience ? 'Wants to work on' : 'Learner’s notes'}>{booking.notes}</Info>}

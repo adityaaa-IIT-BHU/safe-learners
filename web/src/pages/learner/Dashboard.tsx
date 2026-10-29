@@ -1,9 +1,11 @@
-import { ArrowRight, CalendarPlus, CarFront, Clock, History, Inbox, MapPin, Search, Star, Wallet } from 'lucide-react';
+import { ArrowRight, CalendarPlus, CarFront, Clock, History, Inbox, MapPin, PackageCheck, Search, Star, UserRoundSearch, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  CREDIT_PACKAGES,
   LESSON_TYPES,
   PROPOSAL_EXPIRY_HOURS,
+  creditPackagePrice,
   displayRef,
   fullName,
   isExpiredProposal,
@@ -18,7 +20,7 @@ import { AddToCalendarButton, BookingRow } from '@/components/booking';
 import { Avatar, Badge, Button, ButtonLink, Card, CardHeader, EmptyState, Skeleton, Stat, Tabs, formatMoney } from '@/components/ui';
 import { useBookings, useUser } from '@/lib/data';
 import { greeting, timeUntil } from '@/lib/format';
-import { CancelButton, ProposalActions, RateButton, RescheduleButton, ReviewModal } from './actions';
+import { CancelButton, ProposalActions, RateButton, RescheduleButton, ReviewModal, SwitchInstructorButton } from './actions';
 
 type Tab = 'upcoming' | 'history';
 
@@ -103,6 +105,8 @@ export function LearnerDashboard() {
         <Stat label="Upcoming lessons" value={upcoming.filter(b => b.status === 'confirmed').length} icon={<CalendarPlus className="size-4" />} sub={next ? `Next ${timeUntil(next.startAt)}` : 'None booked'} />
       </div>
 
+      <PackageDealsCard />
+
       {instructor && <TestPackageCard instructorId={instructor.id} name={instructor.firstName} price={lessonPrice('test-package', pricingFor(instructor, me))} />}
 
       <section>
@@ -124,7 +128,7 @@ export function LearnerDashboard() {
                 booking={b}
                 to={`/learner/bookings/${b.id}`}
                 person={{ name: b.instructorName }}
-                actions={<><RescheduleButton booking={b} /><CancelButton booking={b} /></>}
+                actions={<><RescheduleButton booking={b} />{b.status === 'cancelled' && <SwitchInstructorButton booking={b} />}<CancelButton booking={b} /></>}
               />
             )) : (
               <Card>
@@ -221,6 +225,32 @@ function MyInstructorCard({ instructor }: { instructor: ReturnType<typeof useUse
           </div>
         </div>
         <ButtonLink to={`/learner/book/${instructor.id}`} variant="dark" className="w-full">Book with {instructor.firstName}</ButtonLink>
+        <ButtonLink to="/learner/instructors" variant="secondary" className="w-full"><UserRoundSearch className="size-4" />Book with a different instructor</ButtonLink>
+      </div>
+    </Card>
+  );
+}
+
+/** The multi-hour wallet packages, so learners see the savings without opening the wallet. */
+function PackageDealsCard() {
+  const deals = CREDIT_PACKAGES.filter(p => p.hours >= 5);
+  return (
+    <Card>
+      <CardHeader title="Package deals" subtitle="Buy lesson credit in bulk and save." action={<Link to="/learner/wallet" className="text-xs font-semibold text-ink-500 hover:text-ink-900 dark:hover:text-white">All options</Link>} />
+      <div className="grid gap-3 p-5 sm:grid-cols-2">
+        {deals.map(p => {
+          const { discount } = creditPackagePrice(p.id);
+          return (
+            <Link key={p.id} to="/learner/wallet" className="flex items-center gap-4 rounded-2xl border-2 border-ink-200 p-4 transition hover:border-ink-400 dark:border-ink-700">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-500/10"><PackageCheck className="size-5" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-2 font-bold">{p.title}{discount > 0 && <Badge tone="green">Save {formatMoney(discount)}</Badge>}</p>
+                <p className="text-sm text-ink-500">{p.blurb}</p>
+              </div>
+              <span className="text-xl font-extrabold">{formatMoney(p.price)}</span>
+            </Link>
+          );
+        })}
       </div>
     </Card>
   );

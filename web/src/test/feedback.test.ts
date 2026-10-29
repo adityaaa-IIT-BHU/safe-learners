@@ -43,32 +43,51 @@ describe('personal events without a travel buffer', () => {
   });
 });
 
-describe('smart scheduling', () => {
-  // Client feedback (Oct 2026): on quiet days every time must show, so only gaps next to a lesson count.
-  it('offers every time on an empty 9–5 day', () => {
-    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], smartGapMinutes: 120, now }));
-    expect(t).toEqual(times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], now })));
-    expect(t).toContain('9:30 am');
-    expect(t).toContain('10:00 am');
+describe('smart scheduling (packed lesson blocks)', () => {
+  // The client's reference calendars (Oct 2026): 45 min travel buffer, 1 hr smart scheduling.
+  const tue = '2026-10-27';
+  const mon = '2026-10-26';
+  const refHours = { tuesday: [{ start: '10:00', end: '18:00' }], monday: [{ start: '11:00', end: '16:00' }] };
+  const smart = { hours: refHours, busy: [], bufferMinutes: 45, smartBlockMinutes: 60, now };
+
+  it('packs 1 hr lessons with the travel buffer between them (reference page 4)', () => {
+    expect(times(openSlotsForDay({ ...smart, day: tue, durationMinutes: 60 }))).toEqual(['10:00 am', '11:45 am', '1:30 pm', '3:15 pm', '5:00 pm']);
+    expect(times(openSlotsForDay({ ...smart, day: mon, durationMinutes: 60 }))).toEqual(['11:00 am', '12:45 pm', '2:30 pm']);
   });
-  it('counts the travel buffer when judging gaps next to a lesson', () => {
-    // Lesson 12–1pm with a 30 min buffer: busy 11:30–1:30. Gaps under 1 hr + buffer next to it are avoided.
-    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('12:00', '13:00')], bufferMinutes: 30, smartGapMinutes: 60, now }));
-    expect(t).toContain('9:00 am'); // leaves 1.5 hr before the buffer: a lesson + buffer fits
-    expect(t).not.toContain('10:00 am'); // would strand 30 min before the buffer
-    expect(t).toContain('10:30 am'); // runs right up to the buffer
-    expect(t).toContain('1:30 pm'); // straight after the buffer
-    expect(t).not.toContain('2:00 pm'); // would strand 30 min after it
-    expect(t).toContain('3:00 pm');
+  it('offers 2 hr lessons on the same blocks (reference page 5)', () => {
+    expect(times(openSlotsForDay({ ...smart, day: tue, durationMinutes: 120 }))).toEqual(['10:00 am', '11:45 am', '1:30 pm', '3:15 pm']);
+    expect(times(openSlotsForDay({ ...smart, day: mon, durationMinutes: 120 }))).toEqual(['11:00 am', '12:45 pm']);
   });
-  it('offers every time in a short window with no lessons', () => {
-    const extra = [{ start: atLocalTime('2026-10-18', '10:00'), end: atLocalTime('2026-10-18', '12:00') }];
-    const t = times(openSlotsForDay({ day: '2026-10-18', durationMinutes: 60, hours: {}, busy: [], extraOpen: extra, bufferMinutes: 30, smartGapMinutes: 60, now }));
-    expect(t).toEqual(['10:00 am', '10:30 am', '11:00 am']);
+  it('uses 2 hr blocks when set to 2 hr', () => {
+    expect(times(openSlotsForDay({ ...smart, smartBlockMinutes: 120, day: tue, durationMinutes: 120 }))).toEqual(['10:00 am', '12:45 pm', '3:30 pm']);
   });
-  it('slots right after an existing lesson plus buffer', () => {
-    const slots = openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('09:00', '10:00')], bufferMinutes: 30, smartGapMinutes: 60, now });
-    expect(times(slots)[0]).toBe('10:30 am');
+  it('starts the next block straight after a lesson plus buffer (client’s Thursday: no 1 hr 15 gap)', () => {
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('09:00', '10:00')], bufferMinutes: 45, smartBlockMinutes: 60, now }));
+    expect(t).toEqual(['10:45 am', '12:30 pm', '2:15 pm', '4:00 pm']);
+    expect(t).not.toContain('11:15 am');
+  });
+  it('also fills the space right before a booked lesson', () => {
+    // Lesson 2–3pm with a 45 min buffer: free 9:00–1:15 and 3:45–5:00.
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [lesson('14:00', '15:00')], bufferMinutes: 45, smartBlockMinutes: 60, now }));
+    expect(t).toEqual(['9:00 am', '10:45 am', '12:15 pm', '3:45 pm']);
+  });
+  it('never offers a time that overlaps a lesson or its buffer', () => {
+    const busy = [lesson('10:00', '11:00'), lesson('13:00', '15:00')];
+    const slots = openSlotsForDay({ day, durationMinutes: 60, hours, busy, bufferMinutes: 45, smartBlockMinutes: 60, now });
+    for (const s of slots) {
+      for (const b of busy) {
+        expect(s.end.getTime() + 45 * 60_000 <= b.start.getTime() || s.start.getTime() >= b.end.getTime() + 45 * 60_000).toBe(true);
+      }
+    }
+  });
+  it('with smart scheduling off, every free half hour is offered (client report: 9am–2:15pm all show)', () => {
+    const t = times(openSlotsForDay({ day, durationMinutes: 60, hours, busy: [], bufferMinutes: 45, now }));
+    expect(t.slice(0, 12)).toEqual(['9:00 am', '9:30 am', '10:00 am', '10:30 am', '11:00 am', '11:30 am', '12:00 pm', '12:30 pm', '1:00 pm', '1:30 pm', '2:00 pm', '2:30 pm']);
+  });
+  it('treats extra open hours the same way', () => {
+    const extra = [{ start: atLocalTime('2026-10-18', '17:00'), end: atLocalTime('2026-10-18', '20:00') }];
+    const t = times(openSlotsForDay({ day: '2026-10-18', durationMinutes: 60, hours: {}, busy: [], extraOpen: extra, bufferMinutes: 45, smartBlockMinutes: 60, now }));
+    expect(t).toEqual(['5:00 pm', '6:45 pm']);
   });
 });
 

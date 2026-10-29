@@ -43,8 +43,8 @@ export interface CalendarSettings {
   bufferMinutes?: number; // travel time kept free between lessons
   minNoticeHours?: number;
   maxAdvanceDays?: number;
-  smartScheduling?: boolean; // avoid leaving unbookable gaps
-  smartGapMinutes?: number; // gaps shorter than this are avoided
+  smartScheduling?: boolean; // offer packed lesson blocks instead of every free time
+  smartGapMinutes?: number; // block length for smart scheduling: 60 (1 hr) or 120 (2 hr)
   defaultView?: 'day' | 'week' | 'month';
 }
 
@@ -333,6 +333,7 @@ export interface Booking {
   pickupLocation?: string;
   dropoffLocation?: string;
   testLocation?: string;
+  testLocationAddress?: string;
   notes?: string;
   experience?: DrivingExperience;
   testBooked?: boolean;
@@ -349,6 +350,8 @@ export interface Booking {
   instructorNotes?: string;
   /** Personal events: whether travel buffer applies around them (default yes). */
   applyBuffer?: boolean;
+  /** Extra open hours: only bookable for pick ups in this suburb (none = any service area). */
+  area?: ServiceArea;
   repeatGroupId?: string;
   createdAt?: Date;
   history?: BookingHistoryEntry[];
@@ -496,6 +499,44 @@ export function coversArea(
   });
 }
 
+// ---------- Pick up / drop off locations ----------
+
+/** A pick up or drop off address, with coordinates when it was picked from Google suggestions. */
+export interface PlaceInput {
+  address: string;
+  lat?: number;
+  lng?: number;
+}
+
+/** The suburb, state and postcode at the end of an address like "12 Yelta St, The Ponds NSW 2769". */
+export function addressArea(address: string): ServiceArea {
+  const parts = address.replace(/,?\s*Australia\s*$/i, '').split(',').map(s => s.trim()).filter(Boolean);
+  return parseAreaString(parts.at(-1) ?? address);
+}
+
+/**
+ * Is a place inside one of these suburbs? Same postcode, same suburb name, or (with coordinates)
+ * within NEARBY_KM of a located suburb. Street names never count, only the suburb part of the address.
+ */
+export function placeInAreas(place: PlaceInput, areas: ServiceArea[]): boolean {
+  const at = addressArea(place.address);
+  const name = at.name.toLowerCase();
+  return areas.some(a => {
+    const an = a.name.toLowerCase();
+    if (at.postcode && (a.postcode === at.postcode || an === at.postcode)) return true;
+    if (name && !/^\d{4}$/.test(name) && an === name) return true;
+    return place.lat !== undefined && place.lng !== undefined && a.lat !== undefined && a.lng !== undefined
+      && distanceKm({ lat: place.lat, lng: place.lng }, { lat: a.lat, lng: a.lng }) <= NEARBY_KM;
+  });
+}
+
+/** "Blacktown, Marayong, Quakers Hill and 4 more" for messages. */
+export function areasSummary(areas: ServiceArea[], max = 4): string {
+  const names = [...new Set(areas.map(a => a.name))];
+  if (names.length <= max) return names.join(', ');
+  return `${names.slice(0, max).join(', ')} and ${names.length - max} more`;
+}
+
 // ---------- Availability ----------
 
 export interface Slot {
@@ -552,11 +593,17 @@ function subtractSpans(from: Span[], remove: Span[]): Span[] {
 /**
  * Open start times for one local day.
  * Free time = weekly hours (plus any extra open hours) minus busy time, where each busy block is
- * padded by the travel buffer. Starts step through each free gap and also include the start that
- * finishes exactly at the end of the gap. With smart scheduling, starts that would strand a gap
- * too short for another lesson (shorter than `smartGapMinutes` plus the travel buffer) next to an
- * existing lesson or event are skipped. The start and end of the working day never count as
- * stranding a gap, so a quiet day offers every start.
+ * padded by the travel buffer.
+ *
+ * Smart scheduling off: starts every `stepMinutes` through each free gap, plus the start that
+ * finishes exactly at the end of the gap.
+ *
+ * Smart scheduling on (`smartBlockMinutes` = 60 or 120): lessons are packed into blocks, the way the
+ * client's reference calendar shows them. Starts begin at the start of each free gap (the start of
+ * the working day, or straight after an existing lesson plus its travel buffer) and repeat every
+ * block length plus travel buffer, e.g. 9:00, 10:45, 12:30 for 1 hr blocks with a 45 min buffer.
+ * The start that finishes flush with the end of the gap is offered too, so the last space before
+ * the next lesson can still be filled.
  */
 export function openSlotsForDay(opts: {
   day: string; // YYYY-MM-DD in the instructor's zone
@@ -568,7 +615,7 @@ export function openSlotsForDay(opts: {
   stepMinutes?: number;
   bufferMinutes?: number;
   minNoticeMinutes?: number;
-  smartGapMinutes?: number; // 0 = off
+  smartBlockMinutes?: number; // 0 = off
   latest?: Date;
   now?: Date;
 }): Slot[] {
@@ -582,7 +629,7 @@ export function openSlotsForDay(opts: {
     stepMinutes = 30,
     bufferMinutes = 0,
     minNoticeMinutes = 120,
-    smartGapMinutes = 0,
+    smartBlockMinutes = 0,
     latest,
     now = new Date(),
   } = opts;
@@ -602,29 +649,22 @@ export function openSlotsForDay(opts: {
     end: b.end.getTime() + (b.bufferMinutes ?? bufferMinutes) * MIN,
   }));
   const free = subtractSpans(open, padded);
-  // Free-time edges that touch a lesson or event (rather than the start or end of working hours).
-  const busyEdges = new Set(padded.flatMap(p => [p.start, p.end]));
+  // Where free time stops because a lesson or event starts (not because working hours end).
+  const busyStarts = new Set(padded.map(p => p.start));
 
   const duration = durationMinutes * MIN;
   const earliest = now.getTime() + minNoticeMinutes * MIN;
-  // A gap is only usable if another lesson fits in it *with* its own travel buffer.
-  const gap = smartGapMinutes > 0 ? (smartGapMinutes + bufferMinutes) * MIN : 0;
+  const smart = smartBlockMinutes > 0;
+  // Smart scheduling steps by a whole block plus the travel buffer the next lesson needs.
+  const step = (smart ? smartBlockMinutes + bufferMinutes : stepMinutes) * MIN;
   const starts = new Set<number>();
   for (const f of free) {
     const candidates: number[] = [];
-    for (let t = f.start; t + duration <= f.end; t += stepMinutes * MIN) candidates.push(t);
-    if (f.end - duration >= f.start) candidates.push(f.end - duration);
+    for (let t = f.start; t + duration <= f.end; t += step) candidates.push(t);
+    // Finishing flush with the next lesson fills the space before it; at the end of the day it would leave a gap instead.
+    if (f.end - duration >= f.start && (!smart || busyStarts.has(f.end))) candidates.push(f.end - duration);
     for (const t of candidates) {
       if (t < earliest || (latest && t > latest.getTime())) continue;
-      if (gap > 0) {
-        const before = t - f.start;
-        const after = f.end - (t + duration);
-        // Lessons flush against either edge of the free window never strand a new gap there.
-        const flush = before === 0 || after === 0;
-        const strandsBefore = busyEdges.has(f.start) && before < gap;
-        const strandsAfter = busyEdges.has(f.end) && after < gap;
-        if (!flush && (strandsBefore || strandsAfter)) continue;
-      }
       starts.add(t);
     }
   }
@@ -641,7 +681,7 @@ export function openSlotsForRange(opts: {
   timeZone?: string;
   bufferMinutes?: number;
   minNoticeMinutes?: number;
-  smartGapMinutes?: number;
+  smartBlockMinutes?: number;
   latest?: Date;
   now?: Date;
 }): Record<string, Slot[]> {
@@ -762,6 +802,8 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     pickupLocation: raw.pickupLocation ?? raw.location,
     dropoffLocation: raw.dropoffLocation,
     testLocation: raw.testLocation,
+    testLocationAddress: raw.testLocationAddress,
+    area: raw.area && typeof raw.area.name === 'string' ? raw.area : undefined,
     notes: raw.notes,
     experience: raw.experience in DRIVING_EXPERIENCE ? raw.experience : undefined,
     testBooked: typeof raw.testBooked === 'boolean' ? raw.testBooked : undefined,

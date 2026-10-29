@@ -1,9 +1,10 @@
 import { Ban, CircleDollarSign, Undo2, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { type Booking } from '@shared/domain';
+import { serviceAreasOf, type Booking, type ServiceArea } from '@shared/domain';
 import { DEFAULT_TIMEZONE, addDaysToKey, atLocalTime, dayKey, formatDate, formatTime, startOfDayKey } from '@shared/time';
-import { useAuth } from '@/auth/AuthProvider';
+import { useAuth, useProfile } from '@/auth/AuthProvider';
+import { AreaPicker } from '@/components/AreaPicker';
 import { Button, Input, Modal, Segmented, Select, Textarea, formatMoney } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 
@@ -143,7 +144,7 @@ export type EventMode = 'event' | 'timeoff' | 'open';
 const EVENT_COPY: Record<EventMode, { title: string; button: string; done: string; blurb: string }> = {
   event: { title: 'Personal event', button: 'Block time', done: 'Time blocked — learners can’t book it.', blurb: 'Block part of a day, e.g. lunch or an appointment.' },
   timeoff: { title: 'Time off', button: 'Add time off', done: 'Time off added — that time is closed to bookings.', blurb: 'Close whole days (holidays, sick days) or a set time, e.g. 3:45–4:45 pm.' },
-  open: { title: 'Extra open hours', button: 'Open these hours', done: 'Extra hours added — learners can book them now.', blurb: 'Take bookings outside your usual weekly hours on one day.' },
+  open: { title: 'Extra open hours', button: 'Open these hours', done: 'Extra hours added — learners can book them now.', blurb: 'Take bookings outside your usual weekly hours on one day — in all your suburbs, or just one (e.g. near home after work).' },
 };
 
 export function EventModal({ open, onClose, mode: initialMode = 'event', initialStart, timeZone = DEFAULT_TIMEZONE }: {
@@ -153,8 +154,10 @@ export function EventModal({ open, onClose, mode: initialMode = 'event', initial
   initialStart?: Date;
   timeZone?: string;
 }) {
+  const me = useProfile();
   const start = initialStart ?? new Date();
   const [mode, setMode] = useState<EventMode>(initialMode);
+  const [area, setArea] = useState<ServiceArea | undefined>();
   const [day, setDay] = useState(dayKey(start, timeZone));
   const [toDay, setToDay] = useState(dayKey(start, timeZone));
   const [from, setFrom] = useState(initialStart ? formatHHmm(start, timeZone) : '09:00');
@@ -188,6 +191,7 @@ export function EventModal({ open, onClose, mode: initialMode = 'event', initial
         title: title.trim() || (mode === 'timeoff' ? 'Time off' : undefined),
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
+        ...(mode === 'open' && area ? { area } : {}),
         ...(mode === 'event' ? {
           location: location.trim() || undefined,
           notes: notes.trim() || undefined,
@@ -229,6 +233,7 @@ export function EventModal({ open, onClose, mode: initialMode = 'event', initial
             <Input label="To" type="time" step={900} value={to} onChange={e => setTo(e.target.value)} />
           </>
         )}
+        {mode === 'open' && <div className="sm:col-span-3"><AreaPicker areas={serviceAreasOf(me)} value={area} onChange={setArea} /></div>}
         {mode === 'event' && (
           <>
             <Select label="Repeat" value={repeat} onChange={e => setRepeat(e.target.value as typeof repeat)} wrapperClassName="sm:col-span-2">

@@ -7,6 +7,9 @@ import {
   PROPOSAL_EXPIRY_HOURS,
   calendarOf,
   STATUS_META,
+  addressArea,
+  areaLabel,
+  areasSummary,
   fullName,
   holdsSlot,
   hoursUntil,
@@ -17,11 +20,15 @@ import {
   openSlotsForDay,
   openSlotsForRange,
   overlaps,
+  placeInAreas,
   pricingFor,
   proposalExpiresAt,
+  serviceAreasOf,
   type Booking,
   type DrivingExperience,
   type LessonType,
+  type PlaceInput,
+  type ServiceArea,
   type UserProfile,
 } from '../../shared/domain';
 import { DEFAULT_TIMEZONE, addDaysToKey, atLocalTime, dayKey, formatDate, formatTime } from '../../shared/time';
@@ -69,6 +76,28 @@ function addressArg(v: unknown, field: string, { required = true } = {}): string
   return value;
 }
 
+/** Coordinates sent with an address picked from Google suggestions (optional). */
+function coordArg(v: unknown, min: number, max: number): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
+}
+
+function placeArg(address: string, lat: unknown, lng: unknown): PlaceInput | null {
+  if (!address) return null;
+  return { address, lat: coordArg(lat, -90, 90), lng: coordArg(lng, -180, 180) };
+}
+
+/** A suburb chosen for extra open hours. */
+function areaArg(v: unknown): ServiceArea | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const a = v as Record<string, unknown>;
+  const name = str(a.name, 'Suburb', { max: 80 });
+  const postcode = typeof a.postcode === 'string' && /^\d{4}$/.test(a.postcode) ? a.postcode : undefined;
+  const state = typeof a.state === 'string' && /^[A-Z]{2,3}$/.test(a.state) ? a.state : undefined;
+  const lat = coordArg(a.lat, -90, 90);
+  const lng = coordArg(a.lng, -180, 180);
+  return { name, ...(state ? { state } : {}), ...(postcode ? { postcode } : {}), ...(lat !== undefined && lng !== undefined ? { lat, lng } : {}) };
+}
+
 function dateArg(v: unknown, field: string): Date {
   const d = typeof v === 'string' || typeof v === 'number' ? new Date(v) : null;
   if (!d || isNaN(d.getTime())) fail(`${field} is invalid.`, 'invalid-argument');
@@ -100,27 +129,75 @@ function assertSlotFree(
   if (clash) fail('That time is no longer available. Please pick another slot.');
 }
 
-/** Availability inputs from the instructor's calendar settings (buffer, notice, smart gaps, extra hours). */
-function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeIds: string[], graceMinutes = 0) {
+/** Extra open hours, each optionally limited to one suburb. */
+function extraHoursOf(existing: Booking[]): Booking[] {
+  return existing.filter(b => b.kind === 'open' && b.status === 'confirmed');
+}
+
+/** Is this place in the instructor's usual service suburbs? (No suburbs set = everywhere.) */
+function inServiceArea(instructor: UserProfile, place: PlaceInput | null | undefined): boolean {
+  const areas = serviceAreasOf(instructor);
+  return !place || !areas.length || placeInAreas(place, areas);
+}
+
+/**
+ * Availability inputs from the instructor's calendar settings (buffer, notice, smart scheduling,
+ * extra hours). With a pick up place, only the time that pick up can book is offered: the weekly
+ * hours and unrestricted extra hours when it's in the usual service suburbs, plus extra hours opened
+ * for its suburb.
+ */
+function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeIds: string[], graceMinutes = 0, pickup?: PlaceInput | null) {
   const cal = calendarOf(instructor);
   const now = new Date();
+  const usual = inServiceArea(instructor, pickup);
   return {
-    hours: instructor.operatingHours || {},
+    hours: usual ? instructor.operatingHours || {} : {},
     // Personal events can opt out of the travel buffer (e.g. a break at home).
     busy: existing.filter(b => !excludeIds.includes(b.id) && holdsSlot(b)).map(b => ({
       start: b.startAt,
       end: b.endAt,
       ...(b.kind === 'event' && b.applyBuffer === false ? { bufferMinutes: 0 } : {}),
     })),
-    extraOpen: existing.filter(b => b.kind === 'open' && b.status === 'confirmed').map(b => ({ start: b.startAt, end: b.endAt })),
+    // Extra hours for a suburb only open up once the pick up is known to be there.
+    extraOpen: extraHoursOf(existing)
+      .filter(b => b.area ? !!pickup && placeInAreas(pickup, [b.area]) : usual)
+      .map(b => ({ start: b.startAt, end: b.endAt })),
     timeZone: tzOf(instructor),
     bufferMinutes: cal.bufferMinutes,
     // A little grace so a slot picked a moment ago doesn't fail on submit.
     minNoticeMinutes: Math.max(0, cal.minNoticeHours * 60 - graceMinutes),
-    smartGapMinutes: cal.smartScheduling ? cal.smartGapMinutes : 0,
+    smartBlockMinutes: cal.smartScheduling ? cal.smartGapMinutes : 0,
     latest: new Date(now.getTime() + cal.maxAdvanceDays * 86_400_000),
     now,
   };
+}
+
+/** Suburbs a booking at this time may pick up / drop off in: the usual ones, plus any extra hours opened for a suburb then. */
+function allowedAreasAt(instructor: UserProfile, existing: Booking[], start: Date, end: Date): ServiceArea[] {
+  const extra = extraHoursOf(existing).filter(b => b.area && b.startAt <= start && b.endAt >= end).map(b => b.area!);
+  return [...serviceAreasOf(instructor), ...extra];
+}
+
+/** Pick up and drop off must both be in suburbs the instructor covers at that time. */
+function assertLocations(instructor: UserProfile, existing: Booking[], start: Date, end: Date, places: { label: string; place: PlaceInput | null }[]) {
+  const areas = allowedAreasAt(instructor, existing, start, end);
+  if (!serviceAreasOf(instructor).length) return; // no suburbs set up yet: nothing to check against
+  for (const { label, place } of places) {
+    if (!place || placeInAreas(place, areas)) continue;
+    const where = addressArea(place.address);
+    fail(`${instructor.firstName} doesn’t cover ${areaLabel(where) || 'that address'}, so it can’t be the ${label}. ` +
+      `${instructor.firstName} covers ${areasSummary(areas)}.`, 'invalid-argument');
+  }
+}
+
+/** Learners pick a test centre from the instructor's own list; returns its name and address. */
+function testCentreArg(instructor: UserProfile, v: unknown): { name: string; address?: string } {
+  const name = str(v, 'Test centre', { max: 300 });
+  const centres = instructor.testLocations ?? [];
+  if (!centres.length) fail(`${instructor.firstName} hasn’t added any driving test centres yet, so test packages can’t be booked online.`);
+  const centre = centres.find(c => c.name === name);
+  if (!centre) fail(`Please choose one of ${instructor.firstName}’s test centres.`, 'invalid-argument');
+  return { name: centre.name, address: centre.address };
 }
 
 /** The instructor's mobile (kept privately) to give booked learners. Read inside the transaction. */
@@ -135,10 +212,10 @@ function assertOffered(instructor: UserProfile, lessonType: LessonType) {
   }
 }
 
-function assertWithinHours(instructor: UserProfile, existing: Booking[], start: Date, minutes: number, excludeIds: string[]) {
+function assertWithinHours(instructor: UserProfile, existing: Booking[], start: Date, minutes: number, excludeIds: string[], pickup?: PlaceInput | null) {
   const tz = tzOf(instructor);
   const slots = openSlotsForDay({
-    ...scheduleOptions(instructor, existing, excludeIds, 15),
+    ...scheduleOptions(instructor, existing, excludeIds, 15, pickup),
     day: dayKey(start, tz),
     durationMinutes: minutes,
   });
@@ -154,6 +231,8 @@ export const getAvailability = onCall(opts, async req => {
   const lessonType = lessonTypeArg(req.data?.lessonType);
   const days = Math.min(Math.max(Number(req.data?.days) || 14, 1), 121);
   const excludeBookingId = typeof req.data?.excludeBookingId === 'string' ? req.data.excludeBookingId : undefined;
+  const pickupAddress = typeof req.data?.pickup?.address === 'string' ? req.data.pickup.address.slice(0, 300).trim() : '';
+  const pickup = placeArg(pickupAddress, req.data?.pickup?.lat, req.data?.pickup?.lng);
 
   const instructor = userFrom(await db.doc(`users/${instructorId}`).get());
   if (!instructor || instructor.role !== 'instructor') fail('Instructor not found.', 'not-found');
@@ -164,14 +243,29 @@ export const getAvailability = onCall(opts, async req => {
 
   const fromDay = typeof req.data?.fromDay === 'string' ? req.data.fromDay : dayKey(new Date(), tz);
   const byDay = openSlotsForRange({
-    ...scheduleOptions(instructor, existing, excludeBookingId ? [excludeBookingId] : []),
+    ...scheduleOptions(instructor, existing, excludeBookingId ? [excludeBookingId] : [], 0, pickup),
     fromDay,
     days: Math.min(days, cal.maxAdvanceDays + 1),
     durationMinutes: LESSON_TYPES[lessonType].minutes,
   });
   const slots: Record<string, string[]> = {};
   for (const [day, list] of Object.entries(byDay)) slots[day] = list.map(s => s.start.toISOString());
-  return { timezone: tz, slots, offered: cal.lessonTypes.includes(lessonType), maxAdvanceDays: cal.maxAdvanceDays };
+  // Upcoming extra hours opened for one suburb, so the picker can tell learners about them.
+  const now = Date.now();
+  const areaHours = extraHoursOf(existing)
+    .filter(b => b.area && b.endAt.getTime() > now)
+    .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+    .slice(0, 20)
+    .map(b => ({ start: b.startAt.toISOString(), end: b.endAt.toISOString(), area: b.area! }));
+  return {
+    timezone: tz,
+    slots,
+    offered: cal.lessonTypes.includes(lessonType),
+    maxAdvanceDays: cal.maxAdvanceDays,
+    smartScheduling: cal.smartScheduling ? cal.smartGapMinutes : 0,
+    areaHours,
+    pickupCovered: !pickup || inServiceArea(instructor, pickup),
+  };
 });
 
 // ---------- Learner books a lesson (optionally rebooking an existing one) ----------
@@ -182,8 +276,10 @@ export const createBooking = onCall(opts, async req => {
   const lessonType = lessonTypeArg(req.data?.lessonType);
   const startAt = dateArg(req.data?.startAt, 'startAt');
   const pickupLocation = addressArg(req.data?.pickupLocation, 'Pick up address');
-  const dropoffLocation = addressArg(req.data?.dropoffLocation, 'Drop off address', { required: false }) || pickupLocation;
-  const testLocation = str(req.data?.testLocation, 'Test location', { required: lessonType === 'test-package' });
+  const dropoffTyped = addressArg(req.data?.dropoffLocation, 'Drop off address', { required: false });
+  const dropoffLocation = dropoffTyped || pickupLocation;
+  const pickup = placeArg(pickupLocation, req.data?.pickupLat, req.data?.pickupLng);
+  const dropoff = dropoffTyped ? placeArg(dropoffTyped, req.data?.dropoffLat, req.data?.dropoffLng) : null;
   const notes = str(req.data?.notes, 'Notes', { required: false, max: 1000 });
   const rescheduleOf = str(req.data?.rescheduleOf, 'rescheduleOf', { required: false, max: 128 });
   // Optional so a page loaded before this release can still book.
@@ -212,7 +308,9 @@ export const createBooking = onCall(opts, async req => {
     const tz = tzOf(instructor);
     const ref = await reserveRef(tx, startAt, tz);
 
-    assertWithinHours(instructor, existing, startAt, minutes, old ? [old.id] : []);
+    const testCentre = lessonType === 'test-package' ? testCentreArg(instructor, req.data?.testLocation) : null;
+    assertLocations(instructor, existing, startAt, endAt, [{ label: 'pick up', place: pickup }, { label: 'drop off', place: dropoff }]);
+    assertWithinHours(instructor, existing, startAt, minutes, old ? [old.id] : [], pickup);
 
     // --- writes ---
     const price = lessonPrice(lessonType, pricingFor(instructor, learner));
@@ -253,7 +351,8 @@ export const createBooking = onCall(opts, async req => {
       transmission: instructor.transmission || 'Auto',
       pickupLocation,
       dropoffLocation,
-      testLocation: testLocation || undefined,
+      testLocation: testCentre?.name,
+      testLocationAddress: testCentre?.address,
       notes: notes || undefined,
       experience,
       testBooked,
@@ -290,7 +389,9 @@ export const createBooking = onCall(opts, async req => {
   await notify(booking.instructorId, {
     type: 'booking_confirmed',
     title: old ? `Booking ${old.ref ?? ''} moved by ${result.learnerName}` : `New booking from ${result.learnerName}`,
-    body: `${LESSON_TYPES[booking.lessonType!].label} on ${when(booking)} at ${booking.pickupLocation}. Ref ${booking.ref}.`,
+    body: `${LESSON_TYPES[booking.lessonType!].label} on ${when(booking)} at ${booking.pickupLocation}.` +
+      (booking.testLocation ? ` Test centre: ${[booking.testLocation, booking.testLocationAddress].filter(Boolean).join(', ')}.` : '') +
+      ` Ref ${booking.ref}.`,
     link: `/instructor/bookings/${booking.id}`,
   });
   return { bookingId: booking.id, ref: booking.ref, paymentStatus: booking.paymentStatus };
@@ -304,6 +405,7 @@ export const proposeBooking = onCall(opts, async req => {
   const lessonType = lessonTypeArg(req.data?.lessonType);
   const startAt = dateArg(req.data?.startAt, 'startAt');
   const pickupLocation = str(req.data?.pickupLocation, 'Pick up location');
+  const pickup = placeArg(pickupLocation, req.data?.pickupLat, req.data?.pickupLng);
   const notes = str(req.data?.notes, 'Notes', { required: false, max: 1000 });
   const rescheduleOf = str(req.data?.rescheduleOf, 'rescheduleOf', { required: false, max: 128 });
   const allowOutsideHours = req.data?.allowOutsideHours === true;
@@ -328,8 +430,10 @@ export const proposeBooking = onCall(opts, async req => {
     const learnerSnap = old?.status === 'confirmed' && old.paymentStatus === 'paid' ? learner : null;
 
     const exclude = old ? [old.id] : [];
+    // Same suburb rules as learner bookings, even for custom times.
+    assertLocations(instructor, existing, startAt, endAt, [{ label: 'pick up', place: pickup }]);
     if (allowOutsideHours) assertSlotFree(existing, startAt, endAt, { excludeIds: exclude });
-    else assertWithinHours(instructor, existing, startAt, minutes, exclude);
+    else assertWithinHours(instructor, existing, startAt, minutes, exclude, pickup);
 
     if (old && old.status !== 'cancelled') {
       if (learnerSnap && old.price) {
@@ -570,7 +674,13 @@ function eventDetails(data: any) {
     location: str(data?.location, 'Address', { required: false, max: 300 }),
     notes: str(data?.notes, 'Notes', { required: false, max: 1000 }),
     applyBuffer: data?.applyBuffer !== false,
+    area: areaArg(data?.area),
   };
+}
+
+/** Calendar label for extra open hours, e.g. "Extra hours · Kellyville". */
+function openHoursTitle(area?: ServiceArea): string {
+  return area ? `Extra hours · ${area.name}` : 'Extra open hours';
 }
 
 export const createEvent = onCall(opts, async req => {
@@ -578,7 +688,8 @@ export const createEvent = onCall(opts, async req => {
   const instructor = await requireUser(instructorId, 'instructor');
   // 'event' blocks time (personal events, time off); 'open' adds extra bookable hours.
   const kind = req.data?.kind === 'open' ? 'open' : 'event';
-  const { title, location, notes, applyBuffer } = eventDetails(req.data);
+  const { title, location, notes, applyBuffer, area: requestedArea } = eventDetails(req.data);
+  const area = kind === 'open' ? requestedArea : undefined;
   const startAt = dateArg(req.data?.startAt, 'Start');
   const endAt = dateArg(req.data?.endAt, 'End');
   if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
@@ -602,13 +713,14 @@ export const createEvent = onCall(opts, async req => {
         kind,
         status: 'confirmed',
         instructorId,
-        title: title || (kind === 'open' ? 'Extra open hours' : 'Personal time'),
+        title: title || (kind === 'open' ? openHoursTitle(area) : 'Personal time'),
         startAt: shift(startAt),
         endAt: shift(endAt),
         timezone: tzOf(instructor),
         pickupLocation: location || undefined,
         notes: notes || undefined,
         applyBuffer: kind === 'event' ? applyBuffer : undefined,
+        area,
         repeatGroupId,
       }),
       createdAt: FieldValue.serverTimestamp(),
@@ -624,15 +736,18 @@ export const updateEvent = onCall(opts, async req => {
   const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
   const event = bookingFrom(await db.doc(`bookings/${bookingId}`).get());
   if (!event || event.instructorId !== instructorId || event.kind === 'lesson') fail('Event not found.', 'not-found');
-  const { title, location, notes, applyBuffer } = eventDetails(req.data);
+  const { title, location, notes, applyBuffer, area: requestedArea } = eventDetails(req.data);
+  const isOpen = event.kind === 'open';
+  const area = isOpen ? requestedArea : undefined;
   const startAt = dateArg(req.data?.startAt, 'Start');
   const endAt = dateArg(req.data?.endAt, 'End');
   if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
-  if (event.kind === 'open' && endAt.getTime() - startAt.getTime() > 86_400_000) fail('Extra open hours must be within one day.', 'invalid-argument');
+  if (isOpen && endAt.getTime() - startAt.getTime() > 86_400_000) fail('Extra open hours must be within one day.', 'invalid-argument');
   await db.doc(`bookings/${bookingId}`).update({
     ...bookingFields({
       ...event,
-      title: title || event.title,
+      // Extra hours are labelled by their suburb; other events keep their own title.
+      title: isOpen ? openHoursTitle(area) : title || event.title,
       startAt,
       endAt,
       pickupLocation: location || undefined,
@@ -641,6 +756,7 @@ export const updateEvent = onCall(opts, async req => {
     }),
     pickupLocation: location || FieldValue.delete(),
     notes: notes || FieldValue.delete(),
+    ...(isOpen ? { area: area ?? FieldValue.delete() } : {}),
   });
   return { ok: true };
 });

@@ -1,6 +1,6 @@
-import { CalendarOff, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Lock, Send } from 'lucide-react';
+import { CalendarOff, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Lock, Send, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CLOSED_STATUSES, calendarOf, isExpiredProposal, type Booking } from '@shared/domain';
 import {
   DEFAULT_TIMEZONE,
@@ -119,6 +119,10 @@ export function Calendar() {
           <Button size="sm" variant="ghost" aria-label="Previous" onClick={() => move(-1)}><ChevronLeft className="size-4" /></Button>
           <Button size="sm" variant="ghost" aria-label="Next" onClick={() => move(1)}><ChevronRight className="size-4" /></Button>
           <p className="ml-2 font-bold">{title}</p>
+          <Link to="/instructor/calendar-settings" className="ml-3 hidden items-center gap-1.5 rounded-full border border-ink-200 px-2.5 py-1 text-xs font-semibold text-ink-600 hover:border-ink-400 md:inline-flex dark:border-ink-700 dark:text-ink-300"
+            title="Change in Calendar settings">
+            <Sparkles className="size-3.5" />Smart scheduling: {calendarOf(me).smartScheduling ? `On · ${calendarOf(me).smartGapMinutes / 60} hr blocks` : 'Off'}
+          </Link>
           <div className="ml-auto hidden items-center gap-3 text-xs text-ink-500 sm:flex">
             <Legend className="bg-emerald-100 dark:bg-emerald-500/15" label="Available" />
             <Legend className="bg-brand-400" label="Lesson" />

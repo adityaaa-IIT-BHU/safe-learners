@@ -2,7 +2,8 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { Check } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { LESSON_TYPES, LESSON_TYPE_ORDER, REQUIRED_LESSON_TYPES, calendarOf, type CalendarSettings as Settings, type LessonType } from '@shared/domain';
+import { LESSON_TYPES, LESSON_TYPE_ORDER, REQUIRED_LESSON_TYPES, calendarOf, openSlotsForDay, type CalendarSettings as Settings, type LessonType } from '@shared/domain';
+import { formatTime } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { Button, Card, CardHeader, PageHeader, Segmented, Select, cx } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
@@ -11,6 +12,28 @@ import { db } from '@/lib/firebase';
 const BUFFERS = [0, 15, 30, 45, 60, 90];
 const NOTICE = [1, 2, 4, 6, 12, 24, 48];
 const ADVANCE = [14, 30, 45, 60, 75, 90, 120];
+
+/** Shows the start times learners would see on an empty 9am–5pm day with these settings. */
+function SmartExample({ settings: s }: { settings: Required<Settings> }) {
+  const day = '2030-01-07'; // a Monday, far enough ahead that notice periods don't matter
+  const hours = { monday: [{ start: '09:00', end: '17:00' }] };
+  const starts = (minutes: number) => openSlotsForDay({
+    day, durationMinutes: minutes, hours, busy: [], bufferMinutes: s.bufferMinutes,
+    smartBlockMinutes: s.smartScheduling ? s.smartGapMinutes : 0, now: new Date('2029-12-01T00:00:00Z'),
+  }).map(x => formatTime(x.start));
+  const oneHour = starts(60);
+  const list = (t: string[]) => (t.length > 8 ? `${t.slice(0, 8).join(', ')} …` : t.join(', '));
+  return (
+    <div className="rounded-xl bg-ink-50 p-3 text-xs text-ink-600 dark:bg-ink-800/60 dark:text-ink-300">
+      <p className="font-semibold">On an empty 9am–5pm day{s.bufferMinutes ? ` with your ${s.bufferMinutes} min travel buffer` : ''}, learners see:</p>
+      <p className="mt-1">1 hr lessons: {list(oneHour)}</p>
+      <p>2 hr lessons: {list(starts(120))}</p>
+      {s.smartScheduling
+        ? <p className="mt-1 text-ink-500">After each booking, the next block starts straight after the lesson plus your travel buffer.</p>
+        : <p className="mt-1 text-ink-500">Smart scheduling is off: every free half hour is offered.</p>}
+    </div>
+  );
+}
 
 export function CalendarSettings() {
   const me = useProfile();
@@ -87,7 +110,7 @@ export function CalendarSettings() {
           </Card>
 
           <Card>
-            <CardHeader title="Smart scheduling" subtitle="Only offer times that don’t leave short, unbookable gaps in your day." />
+            <CardHeader title="Smart scheduling" subtitle="Reduces awkward gaps: learners are offered times that pack lessons back to back, with your travel buffer in between." />
             <div className="space-y-4 p-5">
               <label className="flex items-center gap-3">
                 <button type="button" role="switch" aria-checked={s.smartScheduling} disabled={readOnly} onClick={() => update('smartScheduling', !s.smartScheduling)}
@@ -98,12 +121,12 @@ export function CalendarSettings() {
               </label>
               {s.smartScheduling && (
                 <div>
-                  <p className="mb-2 text-sm text-ink-600 dark:text-ink-300">Avoid gaps shorter than:</p>
+                  <p className="mb-2 text-sm text-ink-600 dark:text-ink-300">Lesson blocks of:</p>
                   <Segmented value={String(s.smartGapMinutes)} onChange={v => update('smartGapMinutes', Number(v))}
-                    options={[{ value: '60', label: '1 hour' }, { value: '120', label: '2 hours' }]} className="max-w-xs [&_button]:text-center" />
+                    options={[{ value: '60', label: '1 hr' }, { value: '120', label: '2 hr' }]} className="max-w-xs [&_button]:text-center" />
                 </div>
               )}
-              <p className="text-xs text-ink-500">Example: you have a lesson 12–1pm. Without smart scheduling a learner could book 1:30pm, leaving a 30 minute gap after your lesson that nobody can book. With it on, they’re offered 1pm (or a time that leaves at least the gap above). Times at the start and end of your day are always offered, so quiet days stay fully bookable.</p>
+              <SmartExample settings={s} />
             </div>
           </Card>
 

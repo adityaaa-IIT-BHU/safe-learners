@@ -1,5 +1,5 @@
 /// <reference types="google.maps" />
-import type { ServiceArea } from '@shared/domain';
+import type { PlaceInput, ServiceArea } from '@shared/domain';
 
 // The client's Google Maps key (browser key, restricted to the site's domains in Google Cloud).
 const MAPS_KEY = 'AIzaSyCnR1zekmfJ04AnY4FeJUVRGildidvU0rg';
@@ -74,19 +74,34 @@ export async function geocodeArea(query: string): Promise<LocatedArea | null> {
   }
 }
 
-/** Attaches Google street-address suggestions to a text input; `onPick` gets the chosen address. */
-export async function attachAddressAutocomplete(input: HTMLInputElement, onPick: (address: string) => void) {
+/** Attaches Google street-address suggestions to a text input; `onPick` gets the chosen address and its location. */
+export async function attachAddressAutocomplete(input: HTMLInputElement, onPick: (place: PlaceInput) => void) {
   const g = await loadMaps();
   const ac = new g.maps.places.Autocomplete(input, {
     types: ['address'],
     componentRestrictions: { country: 'au' },
-    fields: ['formatted_address'],
+    fields: ['formatted_address', 'geometry'],
   });
   ac.addListener('place_changed', () => {
-    const address = ac.getPlace()?.formatted_address?.replace(/,\s*Australia$/, '');
-    if (address) onPick(address);
+    const p = ac.getPlace();
+    const address = p?.formatted_address?.replace(/,\s*Australia$/, '');
+    const loc = p?.geometry?.location;
+    if (address) onPick({ address, ...(loc ? { lat: loc.lat(), lng: loc.lng() } : {}) });
   });
   return ac;
+}
+
+/** Looks up a typed place name (e.g. "Service NSW Blacktown") to get its full address and location. */
+export async function findPlace(query: string): Promise<{ address: string; lat: number; lng: number } | null> {
+  const g = await loadMaps();
+  try {
+    const { results } = await new g.maps.Geocoder().geocode({ address: `${query.trim()}, Australia`, componentRestrictions: { country: 'AU' } });
+    const r = results[0];
+    if (!r?.formatted_address) return null;
+    return { address: r.formatted_address.replace(/,\s*Australia$/, ''), lat: r.geometry.location.lat(), lng: r.geometry.location.lng() };
+  } catch {
+    return null;
+  }
 }
 
 /** Attaches Google suburb suggestions to a text input. */

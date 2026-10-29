@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import { LESSON_TYPES, LESSON_TYPE_ORDER, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isPrivateLearner, lessonPrice, pricingFor, type LessonType } from '@shared/domain';
 import { DEFAULT_TIMEZONE, atLocalTime, dayKey, formatDate, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
-import { SlotPicker } from '@/components/booking';
+import { AddressInput, EMPTY_ADDRESS, areaProblem, placeOf, type AddressValue } from '@/components/AddressInput';
+import { SlotPicker, type Availability } from '@/components/booking';
 import { Button, Card, CardHeader, Input, PageHeader, Segmented, Select, Textarea, formatMoney } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useBooking, useBookings } from '@/lib/data';
@@ -31,7 +32,8 @@ export function Propose() {
   const [slot, setSlot] = useState<string | null>(null);
   const [customDay, setCustomDay] = useState(presetStart ? dayKey(new Date(presetStart), tz) : dayKey(new Date(Date.now() + 86_400_000), tz));
   const [customTime, setCustomTime] = useState(presetStart ? formatHHmm(new Date(presetStart), tz) : '09:00');
-  const [pickup, setPickup] = useState('');
+  const [pickup, setPickup] = useState<AddressValue>(EMPTY_ADDRESS);
+  const [availability, setAvailability] = useState<Availability | null>(null);
   const [notes, setNotes] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,19 +42,20 @@ export function Propose() {
     if (!original) return;
     setLearnerId(original.learnerId ?? '');
     if (original.lessonType) setLessonType(original.lessonType);
-    setPickup(p => p || original.pickupLocation || '');
+    setPickup(p => p.text || !original.pickupLocation ? p : { text: original.pickupLocation, valid: true });
   }, [original]);
 
   // Default the pick up address to the learner's usual address.
   const learner = learners.find(l => l.id === learnerId);
   useEffect(() => {
-    if (learner?.homeSuburb && !rescheduleId) setPickup(p => p || learner.homeSuburb!);
+    if (learner?.homeSuburb && !rescheduleId) setPickup(p => p.text ? p : { text: learner.homeSuburb!, valid: true });
   }, [learner?.homeSuburb, rescheduleId]);
 
   const startIso = mode === 'availability' ? slot : customStartIso(customDay, customTime, tz);
   const start = startIso ? new Date(startIso) : null;
   const end = start ? new Date(start.getTime() + LESSON_TYPES[lessonType].minutes * 60_000) : null;
-  const ready = !!learnerId && !!start && start.getTime() > Date.now() && pickup.trim().length > 2;
+  const pickupProblem = areaProblem(me, pickup, (availability?.areaHours ?? []).map(h => h.area), 'pick up');
+  const ready = !!learnerId && !!start && start.getTime() > Date.now() && pickup.valid && !pickupProblem;
 
   const submit = async () => {
     if (!startIso) return;
@@ -62,7 +65,9 @@ export function Propose() {
         learnerId,
         lessonType,
         startAt: startIso,
-        pickupLocation: pickup.trim(),
+        pickupLocation: pickup.text.trim(),
+        pickupLat: pickup.lat,
+        pickupLng: pickup.lng,
         notes: notes.trim() || undefined,
         rescheduleOf: rescheduleId,
         allowOutsideHours: mode === 'custom',
@@ -122,7 +127,8 @@ export function Propose() {
             } />
             <div className="p-5">
               {mode === 'availability' ? (
-                <SlotPicker instructorId={me.id} lessonType={lessonType} value={slot} onChange={setSlot} excludeBookingId={rescheduleId} />
+                <SlotPicker instructorId={me.id} lessonType={lessonType} value={slot} onChange={setSlot} excludeBookingId={rescheduleId}
+                  pickup={pickup.valid && !pickupProblem ? placeOf(pickup) : null} onLoaded={setAvailability} />
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Input label="Date" type="date" value={customDay} min={dayKey(new Date(), tz)} onChange={e => setCustomDay(e.target.value)} />
@@ -136,11 +142,12 @@ export function Propose() {
           <Card>
             <CardHeader title="Pick up" />
             <div className="space-y-4 p-5">
-              <Input label="Pick up address" placeholder="e.g. 12 Windsor Rd, Kellyville NSW 2155" value={pickup} onChange={e => setPickup(e.target.value)} hint="Street, suburb, state and postcode — any address works." />
+              <AddressInput label="Pick up address" placeholder="e.g. 12 Windsor Rd, Kellyville NSW 2155" value={pickup} onChange={setPickup}
+                requireSuggestion={false} areaError={pickupProblem} hint="Must be in one of your suburbs (or a suburb you’ve opened extra hours in)." />
               {!!me.servicedSuburbs?.length && (
                 <div className="flex flex-wrap gap-1.5">
                   {me.servicedSuburbs.slice(0, 8).map(s => (
-                    <button key={s} type="button" onClick={() => setPickup(s)} className="rounded-full border border-ink-200 px-2.5 py-1 text-xs font-semibold hover:border-ink-400 dark:border-ink-700">{s}</button>
+                    <button key={s} type="button" onClick={() => setPickup({ text: s, valid: true })} className="rounded-full border border-ink-200 px-2.5 py-1 text-xs font-semibold hover:border-ink-400 dark:border-ink-700">{s}</button>
                   ))}
                 </div>
               )}

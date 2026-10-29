@@ -100,8 +100,8 @@ export function bookingFields(b: Booking): Record<string, unknown> {
   };
   const optional: (keyof Booking)[] = [
     'ref', 'instructorName', 'instructorMobile', 'learnerId', 'learnerName', 'lessonType', 'title', 'transmission', 'pickupLocation',
-    'dropoffLocation', 'testLocation', 'notes', 'experience', 'testBooked', 'price', 'paymentStatus', 'proposedBy', 'cancelledBy',
-    'cancellationReason', 'rescheduledFrom', 'rescheduledTo', 'reviewed', 'applyBuffer', 'repeatGroupId',
+    'dropoffLocation', 'testLocation', 'testLocationAddress', 'notes', 'experience', 'testBooked', 'price', 'paymentStatus', 'proposedBy', 'cancelledBy',
+    'cancellationReason', 'rescheduledFrom', 'rescheduledTo', 'reviewed', 'applyBuffer', 'area', 'repeatGroupId',
   ];
   for (const key of optional) if (b[key] !== undefined) out[key] = b[key];
   if (b.expiresAt) out.expiresAt = Timestamp.fromDate(b.expiresAt);

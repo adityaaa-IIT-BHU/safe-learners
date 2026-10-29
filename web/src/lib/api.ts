@@ -1,6 +1,9 @@
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import type { DrivingExperience, LessonType, VerificationStepKey } from '@shared/domain';
+import type { DrivingExperience, LessonType, PlaceInput, ServiceArea, VerificationStepKey } from '@shared/domain';
+
+/** Upcoming extra hours an instructor opened for one suburb. */
+export interface AreaHours { start: string; end: string; area: ServiceArea }
 import { functions } from './firebase';
 
 function callable<Req, Res>(name: string) {
@@ -33,8 +36,16 @@ export const api = {
   onboardUser: callable<{ referralCode?: string }, { claimsChanged: boolean; admin: boolean; claimed?: number }>('onboardUser'),
 
   getAvailability: callable<
-    { instructorId: string; lessonType: LessonType; fromDay?: string; days?: number; excludeBookingId?: string },
-    { timezone: string; slots: Record<string, string[]>; offered?: boolean; maxAdvanceDays?: number }
+    { instructorId: string; lessonType: LessonType; fromDay?: string; days?: number; excludeBookingId?: string; pickup?: PlaceInput },
+    {
+      timezone: string;
+      slots: Record<string, string[]>;
+      offered?: boolean;
+      maxAdvanceDays?: number;
+      smartScheduling?: number;
+      areaHours?: AreaHours[];
+      pickupCovered?: boolean;
+    }
   >('getAvailability'),
 
   createBooking: callable<
@@ -43,7 +54,11 @@ export const api = {
       lessonType: LessonType;
       startAt: string;
       pickupLocation: string;
+      pickupLat?: number;
+      pickupLng?: number;
       dropoffLocation?: string;
+      dropoffLat?: number;
+      dropoffLng?: number;
       testLocation?: string;
       notes?: string;
       experience?: DrivingExperience;
@@ -59,6 +74,8 @@ export const api = {
       lessonType: LessonType;
       startAt: string;
       pickupLocation: string;
+      pickupLat?: number;
+      pickupLng?: number;
       notes?: string;
       rescheduleOf?: string;
       allowOutsideHours?: boolean;
@@ -79,13 +96,14 @@ export const api = {
       location?: string;
       notes?: string;
       applyBuffer?: boolean;
+      area?: ServiceArea;
       repeat?: 'daily' | 'weekly' | 'fortnightly';
       occurrences?: number;
     },
     { bookingId: string; count: number }
   >('createEvent'),
   updateEvent: callable<
-    { bookingId: string; title?: string; startAt: string; endAt: string; location?: string; notes?: string; applyBuffer?: boolean },
+    { bookingId: string; title?: string; startAt: string; endAt: string; location?: string; notes?: string; applyBuffer?: boolean; area?: ServiceArea },
     { ok: true }
   >('updateEvent'),
   deleteEvent: callable<{ bookingId: string; series?: boolean }, { deleted: number }>('deleteEvent'),

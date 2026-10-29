@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CREDIT_PACKAGES,
+  addressArea,
   coversArea,
   creditPackagePrice,
   formatBookingRef,
@@ -14,6 +15,7 @@ import {
   openSlotsForDay,
   parseLegacyDate,
   parseLegacyTime,
+  placeInAreas,
   proposalExpiresAt,
   type Booking,
 } from '@shared/domain';
@@ -106,21 +108,33 @@ describe('availability', () => {
     expect(openSlotsForDay({ day: '2026-10-08', durationMinutes: 60, hours, busy: [], now })).toEqual([]);
   });
 
-  describe('smart scheduling', () => {
-    const saturday = '2026-10-24';
-    const satHours = { saturday: [{ start: '09:00', end: '14:00' }] };
-    const smart = { day: saturday, durationMinutes: 60, hours: satHours, now, smartGapMinutes: 60, bufferMinutes: 60 };
-    const times = (busy: { start: Date; end: Date }[]) => openSlotsForDay({ ...smart, busy }).map(s => formatTime(s.start));
+});
 
-    it('offers every start on a day with no lessons (client report: only 9:00, 11:00 and 1:00 showed)', () => {
-      expect(times([])).toEqual(['9:00 am', '9:30 am', '10:00 am', '10:30 am', '11:00 am', '11:30 am', '12:00 pm', '12:30 pm', '1:00 pm']);
-    });
-    it('still avoids stranding a short gap next to an existing lesson', () => {
-      // Lesson 12–1pm with a 1h buffer: the instructor is busy 11am–2pm, so 9–11am is free.
-      const busy = [{ start: atLocalTime(saturday, '12:00'), end: atLocalTime(saturday, '13:00') }];
-      // 9:30 would leave 30 minutes before the buffer; 9:00 (start of day) and 10:00 (right up to the buffer) are fine.
-      expect(times(busy)).toEqual(['9:00 am', '10:00 am']);
-    });
+describe('pick up and drop off suburbs', () => {
+  const bik = [
+    { name: 'Blacktown', state: 'NSW', postcode: '2148', lat: -33.771, lng: 150.906 },
+    { name: 'Quakers Hill', state: 'NSW', postcode: '2763' },
+    { name: 'Marsden Park', state: 'NSW', postcode: '2765' },
+  ];
+  it('reads the suburb and postcode from an address', () => {
+    expect(addressArea('100 George St, Sydney NSW 2000')).toEqual({ name: 'Sydney', state: 'NSW', postcode: '2000' });
+    expect(addressArea('11 Kildare Rd, Blacktown NSW 2148, Australia')).toEqual({ name: 'Blacktown', state: 'NSW', postcode: '2148' });
+  });
+  it('rejects addresses outside the instructor’s suburbs (client report: Sydney and Parramatta)', () => {
+    expect(placeInAreas({ address: '100 George St, Sydney NSW 2000' }, bik)).toBe(false);
+    expect(placeInAreas({ address: '100 George St, Parramatta NSW 2150' }, bik)).toBe(false);
+  });
+  it('accepts addresses in a covered suburb or postcode', () => {
+    expect(placeInAreas({ address: '11 Kildare Rd, Blacktown NSW 2148' }, bik)).toBe(true);
+    expect(placeInAreas({ address: '12 Honeysuckle Parade, Marsden Park NSW 2765' }, bik)).toBe(true);
+    expect(placeInAreas({ address: '5 Main St, Quakers Hill NSW' }, bik)).toBe(true); // by name
+  });
+  it('accepts an address just over a suburb boundary when its location is known', () => {
+    expect(placeInAreas({ address: '1 Example St, Seven Hills NSW 2147', lat: -33.775, lng: 150.92 }, bik)).toBe(true);
+    expect(placeInAreas({ address: '1 Example St, Seven Hills NSW 2147' }, bik)).toBe(false);
+  });
+  it('does not match on street names', () => {
+    expect(placeInAreas({ address: '1 Blacktown Rd, Seven Hills NSW 2147' }, bik)).toBe(false);
   });
 });
 
