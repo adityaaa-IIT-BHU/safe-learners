@@ -12,6 +12,8 @@ import {
   learnerCanReview,
   lessonPrice,
   normaliseBooking,
+  areasOrList,
+  openHoursAreas,
   openSlotsForDay,
   parseLegacyDate,
   parseLegacyTime,
@@ -254,5 +256,37 @@ describe('document expiry dates', () => {
     expect(isExpired('2026-10-02', undefined, now)).toBe(false); // expires today: still valid today
     expect(isExpired('2026-10-01', undefined, now)).toBe(true);
     expect(isExpired('garbage', undefined, now)).toBe(false);
+  });
+});
+
+describe('extra open hours in several suburbs', () => {
+  const schofields = { name: 'Schofields', state: 'NSW', postcode: '2762' };
+  const ponds = { name: 'The Ponds', state: 'NSW', postcode: '2769' };
+  const base = { id: 'x', kind: 'open', status: 'confirmed', instructorId: 'i', startAt: new Date(), endAt: new Date(), timezone: 'Australia/Sydney' };
+
+  it('reads the list, an older single suburb, or none', () => {
+    expect(openHoursAreas({ areas: [schofields, ponds] })).toEqual([schofields, ponds]);
+    expect(openHoursAreas({ area: schofields })).toEqual([schofields]);
+    expect(openHoursAreas({})).toEqual([]);
+    expect(openHoursAreas({ area: schofields, areas: [ponds] })).toEqual([ponds]);
+  });
+
+  it('keeps the suburb list when loading a booking', () => {
+    const b = normaliseBooking('x', { ...base, areas: [schofields, ponds, { bad: true }] }, d => d as Date)!;
+    expect(b.areas).toEqual([schofields, ponds]);
+    expect(normaliseBooking('x', { ...base, area: schofields }, d => d as Date)!.areas).toBeUndefined();
+  });
+
+  it('accepts a pick up in any chosen suburb', () => {
+    const areas = openHoursAreas({ areas: [schofields, ponds] });
+    expect(placeInAreas({ address: '3 Riverbank Dr, The Ponds NSW 2769' }, areas)).toBe(true);
+    expect(placeInAreas({ address: '9 Railway Tce, Schofields NSW 2762' }, areas)).toBe(true);
+    expect(placeInAreas({ address: '1 Church St, Parramatta NSW 2150' }, areas)).toBe(false);
+  });
+
+  it('lists suburbs for people to read', () => {
+    expect(areasOrList([schofields])).toBe('Schofields');
+    expect(areasOrList([schofields, ponds])).toBe('Schofields or The Ponds');
+    expect(areasOrList([schofields, ponds, { name: 'Tallawong' }])).toBe('Schofields, The Ponds or Tallawong');
   });
 });

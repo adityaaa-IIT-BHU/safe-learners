@@ -321,7 +321,7 @@ function AvailabilityNotes({ data, tz, pickupGiven }: { data: Availability; tz: 
             <p className="font-semibold">Extra hours in specific suburbs{pickupGiven ? '' : ' — enter a pick up address there to see these times'}:</p>
             <ul className="mt-1 space-y-0.5">
               {areaHours.slice(0, 5).map(h => (
-                <li key={h.start}>{formatDate(new Date(h.start), tz)}, {formatTimeRange(new Date(h.start), new Date(h.end), tz)} · {h.area.name}{h.area.postcode ? ` ${h.area.postcode}` : ''}</li>
+                <li key={h.start}>{formatDate(new Date(h.start), tz)}, {formatTimeRange(new Date(h.start), new Date(h.end), tz)} · {h.areas.map(a => `${a.name}${a.postcode ? ` ${a.postcode}` : ''}`).join(', ')}</li>
               ))}
             </ul>
           </div>

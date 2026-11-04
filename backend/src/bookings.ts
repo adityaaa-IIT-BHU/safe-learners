@@ -17,6 +17,7 @@ import {
   isPlausibleAddress,
   learnerCanReschedule,
   lessonPrice,
+  openHoursAreas,
   openSlotsForDay,
   openSlotsForRange,
   overlaps,
@@ -98,6 +99,20 @@ function areaArg(v: unknown): ServiceArea | undefined {
   return { name, ...(state ? { state } : {}), ...(postcode ? { postcode } : {}), ...(lat !== undefined && lng !== undefined ? { lat, lng } : {}) };
 }
 
+const MAX_OPEN_AREAS = 20;
+
+/** Suburbs chosen for extra open hours (`areas`, or a single `area` from older callers), without repeats. */
+function areasArg(data: any): ServiceArea[] {
+  const raw: unknown[] = Array.isArray(data?.areas) ? data.areas : data?.area ? [data.area] : [];
+  if (raw.length > MAX_OPEN_AREAS) fail(`Please choose at most ${MAX_OPEN_AREAS} suburbs.`, 'invalid-argument');
+  const out: ServiceArea[] = [];
+  for (const v of raw) {
+    const a = areaArg(v);
+    if (a && !out.some(x => areaLabel(x).toLowerCase() === areaLabel(a).toLowerCase())) out.push(a);
+  }
+  return out;
+}
+
 function dateArg(v: unknown, field: string): Date {
   const d = typeof v === 'string' || typeof v === 'number' ? new Date(v) : null;
   if (!d || isNaN(d.getTime())) fail(`${field} is invalid.`, 'invalid-argument');
@@ -129,7 +144,7 @@ function assertSlotFree(
   if (clash) fail('That time is no longer available. Please pick another slot.');
 }
 
-/** Extra open hours, each optionally limited to one suburb. */
+/** Extra open hours, each optionally limited to some suburbs. */
 function extraHoursOf(existing: Booking[]): Booking[] {
   return existing.filter(b => b.kind === 'open' && b.status === 'confirmed');
 }
@@ -158,9 +173,12 @@ function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeId
       end: b.endAt,
       ...(b.kind === 'event' && b.applyBuffer === false ? { bufferMinutes: 0 } : {}),
     })),
-    // Extra hours for a suburb only open up once the pick up is known to be there.
+    // Extra hours for some suburbs only open up once the pick up is known to be in one of them.
     extraOpen: extraHoursOf(existing)
-      .filter(b => b.area ? !!pickup && placeInAreas(pickup, [b.area]) : usual)
+      .filter(b => {
+        const areas = openHoursAreas(b);
+        return areas.length ? !!pickup && placeInAreas(pickup, areas) : usual;
+      })
       .map(b => ({ start: b.startAt, end: b.endAt })),
     timeZone: tzOf(instructor),
     bufferMinutes: cal.bufferMinutes,
@@ -172,9 +190,9 @@ function scheduleOptions(instructor: UserProfile, existing: Booking[], excludeId
   };
 }
 
-/** Suburbs a booking at this time may pick up / drop off in: the usual ones, plus any extra hours opened for a suburb then. */
+/** Suburbs a booking at this time may pick up / drop off in: the usual ones, plus the suburbs of any extra hours opened then. */
 function allowedAreasAt(instructor: UserProfile, existing: Booking[], start: Date, end: Date): ServiceArea[] {
-  const extra = extraHoursOf(existing).filter(b => b.area && b.startAt <= start && b.endAt >= end).map(b => b.area!);
+  const extra = extraHoursOf(existing).filter(b => b.startAt <= start && b.endAt >= end).flatMap(openHoursAreas);
   return [...serviceAreasOf(instructor), ...extra];
 }
 
@@ -250,13 +268,13 @@ export const getAvailability = onCall(opts, async req => {
   });
   const slots: Record<string, string[]> = {};
   for (const [day, list] of Object.entries(byDay)) slots[day] = list.map(s => s.start.toISOString());
-  // Upcoming extra hours opened for one suburb, so the picker can tell learners about them.
+  // Upcoming extra hours opened for some suburbs, so the picker can tell learners about them.
   const now = Date.now();
   const areaHours = extraHoursOf(existing)
-    .filter(b => b.area && b.endAt.getTime() > now)
+    .filter(b => openHoursAreas(b).length && b.endAt.getTime() > now)
     .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
     .slice(0, 20)
-    .map(b => ({ start: b.startAt.toISOString(), end: b.endAt.toISOString(), area: b.area! }));
+    .map(b => ({ start: b.startAt.toISOString(), end: b.endAt.toISOString(), areas: openHoursAreas(b) }));
   return {
     timezone: tz,
     slots,
@@ -674,13 +692,14 @@ function eventDetails(data: any) {
     location: str(data?.location, 'Address', { required: false, max: 300 }),
     notes: str(data?.notes, 'Notes', { required: false, max: 1000 }),
     applyBuffer: data?.applyBuffer !== false,
-    area: areaArg(data?.area),
+    areas: areasArg(data),
   };
 }
 
-/** Calendar label for extra open hours, e.g. "Extra hours · Kellyville". */
-function openHoursTitle(area?: ServiceArea): string {
-  return area ? `Extra hours · ${area.name}` : 'Extra open hours';
+/** Calendar label for extra open hours, e.g. "Extra hours · Kellyville" or "Extra hours · Schofields +3". */
+function openHoursTitle(areas: ServiceArea[]): string {
+  if (!areas.length) return 'Extra open hours';
+  return `Extra hours · ${areas[0].name}${areas.length > 1 ? ` +${areas.length - 1}` : ''}`;
 }
 
 export const createEvent = onCall(opts, async req => {
@@ -688,8 +707,8 @@ export const createEvent = onCall(opts, async req => {
   const instructor = await requireUser(instructorId, 'instructor');
   // 'event' blocks time (personal events, time off); 'open' adds extra bookable hours.
   const kind = req.data?.kind === 'open' ? 'open' : 'event';
-  const { title, location, notes, applyBuffer, area: requestedArea } = eventDetails(req.data);
-  const area = kind === 'open' ? requestedArea : undefined;
+  const { title, location, notes, applyBuffer, areas: requestedAreas } = eventDetails(req.data);
+  const areas = kind === 'open' ? requestedAreas : [];
   const startAt = dateArg(req.data?.startAt, 'Start');
   const endAt = dateArg(req.data?.endAt, 'End');
   if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
@@ -713,14 +732,14 @@ export const createEvent = onCall(opts, async req => {
         kind,
         status: 'confirmed',
         instructorId,
-        title: title || (kind === 'open' ? openHoursTitle(area) : 'Personal time'),
+        title: title || (kind === 'open' ? openHoursTitle(areas) : 'Personal time'),
         startAt: shift(startAt),
         endAt: shift(endAt),
         timezone: tzOf(instructor),
         pickupLocation: location || undefined,
         notes: notes || undefined,
         applyBuffer: kind === 'event' ? applyBuffer : undefined,
-        area,
+        areas: areas.length ? areas : undefined,
         repeatGroupId,
       }),
       createdAt: FieldValue.serverTimestamp(),
@@ -736,9 +755,9 @@ export const updateEvent = onCall(opts, async req => {
   const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
   const event = bookingFrom(await db.doc(`bookings/${bookingId}`).get());
   if (!event || event.instructorId !== instructorId || event.kind === 'lesson') fail('Event not found.', 'not-found');
-  const { title, location, notes, applyBuffer, area: requestedArea } = eventDetails(req.data);
+  const { title, location, notes, applyBuffer, areas: requestedAreas } = eventDetails(req.data);
   const isOpen = event.kind === 'open';
-  const area = isOpen ? requestedArea : undefined;
+  const areas = isOpen ? requestedAreas : [];
   const startAt = dateArg(req.data?.startAt, 'Start');
   const endAt = dateArg(req.data?.endAt, 'End');
   if (endAt <= startAt) fail('End time must be after the start time.', 'invalid-argument');
@@ -747,7 +766,7 @@ export const updateEvent = onCall(opts, async req => {
     ...bookingFields({
       ...event,
       // Extra hours are labelled by their suburb; other events keep their own title.
-      title: isOpen ? openHoursTitle(area) : title || event.title,
+      title: isOpen ? openHoursTitle(areas) : title || event.title,
       startAt,
       endAt,
       pickupLocation: location || undefined,
@@ -756,7 +775,8 @@ export const updateEvent = onCall(opts, async req => {
     }),
     pickupLocation: location || FieldValue.delete(),
     notes: notes || FieldValue.delete(),
-    ...(isOpen ? { area: area ?? FieldValue.delete() } : {}),
+    // An older single `area` is replaced by the `areas` list.
+    ...(isOpen ? { areas: areas.length ? areas : FieldValue.delete(), area: FieldValue.delete() } : {}),
   });
   return { ok: true };
 });

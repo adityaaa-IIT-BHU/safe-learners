@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import type { DrivingExperience, LessonType, PlaceInput, ServiceArea, VerificationStepKey } from '@shared/domain';
 
 /** Upcoming extra hours an instructor opened for one suburb. */
-export interface AreaHours { start: string; end: string; area: ServiceArea }
+export interface AreaHours { start: string; end: string; areas: ServiceArea[] }
 import { functions } from './firebase';
 
 function callable<Req, Res>(name: string) {
@@ -96,14 +96,14 @@ export const api = {
       location?: string;
       notes?: string;
       applyBuffer?: boolean;
-      area?: ServiceArea;
+      areas?: ServiceArea[];
       repeat?: 'daily' | 'weekly' | 'fortnightly';
       occurrences?: number;
     },
     { bookingId: string; count: number }
   >('createEvent'),
   updateEvent: callable<
-    { bookingId: string; title?: string; startAt: string; endAt: string; location?: string; notes?: string; applyBuffer?: boolean; area?: ServiceArea },
+    { bookingId: string; title?: string; startAt: string; endAt: string; location?: string; notes?: string; applyBuffer?: boolean; areas?: ServiceArea[] },
     { ok: true }
   >('updateEvent'),
   deleteEvent: callable<{ bookingId: string; series?: boolean }, { deleted: number }>('deleteEvent'),

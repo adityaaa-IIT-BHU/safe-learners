@@ -54,7 +54,7 @@ export function Propose() {
   const startIso = mode === 'availability' ? slot : customStartIso(customDay, customTime, tz);
   const start = startIso ? new Date(startIso) : null;
   const end = start ? new Date(start.getTime() + LESSON_TYPES[lessonType].minutes * 60_000) : null;
-  const pickupProblem = areaProblem(me, pickup, (availability?.areaHours ?? []).map(h => h.area), 'pick up');
+  const pickupProblem = areaProblem(me, pickup, (availability?.areaHours ?? []).flatMap(h => h.areas), 'pick up');
   const ready = !!learnerId && !!start && start.getTime() > Date.now() && pickup.valid && !pickupProblem;
 
   const submit = async () => {

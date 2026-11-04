@@ -350,8 +350,10 @@ export interface Booking {
   instructorNotes?: string;
   /** Personal events: whether travel buffer applies around them (default yes). */
   applyBuffer?: boolean;
-  /** Extra open hours: only bookable for pick ups in this suburb (none = any service area). */
+  /** Extra open hours saved before several suburbs were allowed; read through openHoursAreas. */
   area?: ServiceArea;
+  /** Extra open hours: only bookable for pick ups in these suburbs (none = any service area). */
+  areas?: ServiceArea[];
   repeatGroupId?: string;
   createdAt?: Date;
   history?: BookingHistoryEntry[];
@@ -528,6 +530,18 @@ export function placeInAreas(place: PlaceInput, areas: ServiceArea[]): boolean {
     return place.lat !== undefined && place.lng !== undefined && a.lat !== undefined && a.lng !== undefined
       && distanceKm({ lat: place.lat, lng: place.lng }, { lat: a.lat, lng: a.lng }) <= NEARBY_KM;
   });
+}
+
+/** Suburbs extra open hours are limited to; empty means any of the instructor's suburbs. Older entries hold one `area`. */
+export function openHoursAreas(b: Pick<Booking, 'area' | 'areas'>): ServiceArea[] {
+  if (b.areas?.length) return b.areas;
+  return b.area ? [b.area] : [];
+}
+
+/** "Schofields, Tallawong or The Ponds" for who can book extra hours. */
+export function areasOrList(areas: ServiceArea[]): string {
+  const names = areas.map(a => a.name);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names.join('');
 }
 
 /** "Blacktown, Marayong, Quakers Hill and 4 more" for messages. */
@@ -804,6 +818,7 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     testLocation: raw.testLocation,
     testLocationAddress: raw.testLocationAddress,
     area: raw.area && typeof raw.area.name === 'string' ? raw.area : undefined,
+    areas: Array.isArray(raw.areas) ? raw.areas.filter((a: any) => a && typeof a.name === 'string') : undefined,
     notes: raw.notes,
     experience: raw.experience in DRIVING_EXPERIENCE ? raw.experience : undefined,
     testBooked: typeof raw.testBooked === 'boolean' ? raw.testBooked : undefined,

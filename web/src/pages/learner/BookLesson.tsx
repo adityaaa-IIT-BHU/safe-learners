@@ -86,7 +86,7 @@ export function BookLesson() {
   const end = start ? new Date(start.getTime() + LESSON_TYPES[lessonType].minutes * 60_000) : null;
   const tz = instructor.timezone ?? 'Australia/Sydney';
   // Suburbs the instructor has opened extra hours in also accept pick ups (only at those times).
-  const extraAreas = (availability?.areaHours ?? []).map(h => h.area);
+  const extraAreas = (availability?.areaHours ?? []).flatMap(h => h.areas);
   const pickupProblem = areaProblem(instructor, pickup, extraAreas, 'pick up');
   const dropoffProblem = areaProblem(instructor, dropoff, extraAreas, 'drop off');
   const testCentres = instructor.testLocations ?? [];
