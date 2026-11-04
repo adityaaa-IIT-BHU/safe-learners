@@ -104,9 +104,40 @@ export async function findPlace(query: string): Promise<{ address: string; lat: 
   }
 }
 
+/**
+ * Google adds its suggestion list to <body>, which an open modal <dialog> covers, so the list can't be
+ * seen or clicked. Inside a dialog, move the list into it and keep it lined up under the input.
+ */
+function keepSuggestionsInDialog(input: HTMLInputElement, existing: Set<Element>) {
+  const dialog = input.closest('dialog');
+  if (!dialog) return;
+  const adopt = (pac: HTMLElement) => {
+    dialog.appendChild(pac);
+    const place = () => {
+      const i = input.getBoundingClientRect();
+      const d = dialog.getBoundingClientRect();
+      const want = { position: 'absolute', left: `${i.left - d.left + dialog.scrollLeft}px`, top: `${i.bottom - d.top + dialog.scrollTop}px`, width: `${i.width}px` };
+      // Only write when different, so this observer doesn't keep re-triggering itself.
+      for (const [k, v] of Object.entries(want)) if (pac.style.getPropertyValue(k) !== v) pac.style.setProperty(k, v);
+    };
+    new MutationObserver(place).observe(pac, { attributes: true, attributeFilter: ['style'] });
+    place();
+  };
+  const fresh = () => [...document.querySelectorAll<HTMLElement>('body > .pac-container')].find(p => !existing.has(p));
+  const found = fresh();
+  if (found) return adopt(found);
+  const watch = new MutationObserver(() => {
+    const pac = fresh();
+    if (pac) { watch.disconnect(); adopt(pac); }
+  });
+  watch.observe(document.body, { childList: true });
+}
+
 /** Attaches Google suburb suggestions to a text input. */
 export async function attachSuburbAutocomplete(input: HTMLInputElement, onPick: (area: ServiceArea) => void) {
   const g = await loadMaps();
+  const existing = new Set(document.querySelectorAll('.pac-container'));
+  keepSuggestionsInDialog(input, existing);
   const ac = new g.maps.places.Autocomplete(input, {
     types: ['(regions)'],
     componentRestrictions: { country: 'au' },
