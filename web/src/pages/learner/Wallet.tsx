@@ -1,11 +1,13 @@
 import { collection, limit, orderBy, query } from 'firebase/firestore';
 import { ArrowDownLeft, ArrowUpRight, CreditCard, Mail, Wallet as WalletIcon } from 'lucide-react';
 import { useState } from 'react';
-import { CREDIT_HOURLY_RATE, CREDIT_PACKAGES, creditPackagePrice, type CreditPackageId } from '@shared/domain';
+import { Link } from 'react-router-dom';
+import { CREDIT_HOURLY_RATE, CREDIT_PACKAGES, STATUS_META, creditPackagePrice, displayRef, type CreditPackageId } from '@shared/domain';
 import { formatDate } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
+import { PaymentBadge, PaymentLines, lessonLabel } from '@/components/booking';
 import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, cx, formatMoney } from '@/components/ui';
-import { mapTransaction, useQuery } from '@/lib/data';
+import { mapTransaction, useBookings, useQuery } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { SUPPORT_EMAIL } from '../public/Layout';
 
@@ -32,7 +34,7 @@ export function Wallet() {
             <div className="absolute -right-10 -top-10 size-48 rounded-full bg-brand-500/25 blur-2xl" />
             <p className="flex items-center gap-2 text-sm font-semibold text-ink-300"><WalletIcon className="size-4" />Available balance</p>
             <p className="mt-2 text-5xl font-extrabold tracking-tight">{formatMoney(me.walletBalance ?? 0)}</p>
-            <p className="mt-3 text-sm text-ink-400">Used automatically when you book. Cancellations more than 24 hours ahead are refunded here.</p>
+            <p className="mt-3 text-sm text-ink-400">Used automatically when you book: the whole lesson if it covers it, otherwise part of it, with the rest due before the lesson. Cancellations more than 24 hours ahead are refunded here.</p>
           </Card>
 
           <Card>
@@ -66,9 +68,9 @@ export function Wallet() {
           </Card>
 
           <Card>
-            <CardHeader title="Activity" />
+            <CardHeader title="Activity" subtitle="Every change to your balance." />
             {transactions.length === 0 ? (
-              <EmptyState title="No activity yet" body="Bookings, refunds and rewards will show here." />
+              <EmptyState title="No activity yet" body="Credit added, lessons paid from your wallet, refunds and rewards will show here." />
             ) : (
               <ul className="divide-y divide-ink-100 dark:divide-ink-800">
                 {transactions.map(t => (
@@ -77,7 +79,7 @@ export function Wallet() {
                       {t.amount >= 0 ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{t.note}</p>
+                      <p className="line-clamp-2 text-sm font-semibold">{t.note}</p>
                       <p className="text-xs text-ink-500">{t.createdAt ? formatDate(t.createdAt) : ''}</p>
                     </div>
                     <span className={cx('text-sm font-bold', t.amount >= 0 && 'text-emerald-600')}>{t.amount >= 0 ? '+' : ''}{formatMoney(t.amount)}</span>
@@ -86,6 +88,8 @@ export function Wallet() {
               </ul>
             )}
           </Card>
+
+          <LessonPayments learnerId={uid} />
         </div>
       </div>
 
@@ -98,6 +102,41 @@ export function Wallet() {
         </a>
       </Modal>
     </>
+  );
+}
+
+/** Recent lessons and how each was paid, including ones paid outside the wallet. */
+function LessonPayments({ learnerId }: { learnerId: string | null }) {
+  const { data: bookings } = useBookings('learnerId', learnerId);
+  const lessons = bookings
+    .filter(b => b.kind === 'lesson' && b.price && ['confirmed', 'late_cancel_requested', 'completed', 'cancelled'].includes(b.status))
+    .sort((a, b) => b.startAt.getTime() - a.startAt.getTime())
+    .slice(0, 10);
+  return (
+    <Card>
+      <CardHeader title="Lesson payments" subtitle="How each lesson was paid." />
+      {lessons.length === 0 ? (
+        <EmptyState title="No lessons yet" body="Booked and cancelled lessons will show here." />
+      ) : (
+        <ul className="divide-y divide-ink-100 dark:divide-ink-800">
+          {lessons.map(b => (
+            <li key={b.id}>
+              <Link to={`/learner/bookings/${b.id}`} className="block space-y-2 px-5 py-3 hover:bg-ink-50 dark:hover:bg-ink-800/50">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{displayRef(b)} · {lessonLabel(b)}</p>
+                    <p className="text-xs text-ink-500">{formatDate(b.startAt, b.timezone)} · {STATUS_META[b.status].label}</p>
+                  </div>
+                  <span className="text-sm font-bold">{formatMoney(b.price)}</span>
+                </div>
+                <PaymentBadge booking={b} />
+                <PaymentLines booking={b} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

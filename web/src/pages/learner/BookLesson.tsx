@@ -12,6 +12,7 @@ import {
   isPrivateLearner,
   lessonPrice,
   pricingFor,
+  refundableFromWallet,
   serviceAreasOf,
   type DrivingExperience,
   type LessonType,
@@ -80,6 +81,7 @@ export function BookLesson() {
   const offered = calendarOf(instructor).lessonTypes;
   const balance = me.walletBalance ?? 0;
   const coveredByWallet = balance >= price;
+  const fromWallet = Math.min(Math.max(balance, 0), price);
   const isTest = lessonType === 'test-package';
   const privateRate = isPrivateLearner(me, instructor.id);
   const start = slot ? new Date(slot) : null;
@@ -146,7 +148,7 @@ export function BookLesson() {
       {rescheduleId && original?.status === 'confirmed' && (
         <div className="mb-6 flex gap-3 rounded-2xl bg-sky-50 p-4 text-sm text-sky-900 dark:bg-sky-500/10 dark:text-sky-200">
           <RefreshCw className="mt-0.5 size-4 shrink-0" />
-          Your current booking stays in place until you confirm the new time. Then it’s cancelled{original.paymentStatus === 'paid' ? ' and refunded to your wallet' : ''} automatically.
+          Your current booking stays in place until you confirm the new time. Then it’s cancelled{refundableFromWallet(original) > 0 ? ` and ${formatMoney(refundableFromWallet(original))} is refunded to your wallet` : ''} automatically.
         </div>
       )}
 
@@ -252,7 +254,9 @@ export function BookLesson() {
                   <Info className="mt-px size-3.5 shrink-0" />
                   {coveredByWallet
                     ? `Paid from your wallet (balance ${formatMoney(balance)} → ${formatMoney(balance - price)}).`
-                    : `Your wallet has ${formatMoney(balance)}. The lesson is booked now and payment is due before the lesson.`}
+                    : fromWallet > 0
+                      ? `${formatMoney(fromWallet)} comes from your wallet (balance → ${formatMoney(0)}). The other ${formatMoney(price - fromWallet)} is due before the lesson.`
+                      : `Your wallet has ${formatMoney(balance)}. The lesson is booked now and payment is due before the lesson.`}
                 </p>
               </div>
               <Button size="lg" className="w-full" icon={<CalendarCheck className="size-5" />} disabled={!ready || readOnly} loading={submitting} onClick={submit}>

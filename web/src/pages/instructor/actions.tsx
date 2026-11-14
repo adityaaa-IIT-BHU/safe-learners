@@ -1,7 +1,7 @@
 import { Ban, CircleDollarSign, Undo2, UserPlus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { areasOrList, serviceAreasOf, type Booking, type ServiceArea } from '@shared/domain';
+import { areasOrList, refundableFromWallet, serviceAreasOf, type Booking, type ServiceArea } from '@shared/domain';
 import { DEFAULT_TIMEZONE, addDaysToKey, atLocalTime, dayKey, formatDate, formatTime, startOfDayKey } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { AreaPicker, type AreaPickerHandle } from '@/components/AreaPicker';
@@ -92,7 +92,7 @@ export function InstructorCancelButton({ booking, size = 'md', onDone }: { booki
           <>
             <p className="text-sm text-ink-600 dark:text-ink-300">
               {booking.learnerName}’s lesson on {formatDate(booking.startAt, booking.timezone)} at {formatTime(booking.startAt, booking.timezone)} will be cancelled
-              {booking.paymentStatus === 'paid' ? ` and ${formatMoney(booking.price)} refunded to their wallet` : ''}. Want to move it instead? Use Reschedule.
+              {refundableFromWallet(booking) > 0 ? ` and ${formatMoney(refundableFromWallet(booking))} refunded to their wallet` : ''}. Want to move it instead? Use Reschedule.
             </p>
             <Textarea wrapperClassName="mt-4" label="Message to the learner (optional)" rows={3} value={reason} onChange={e => setReason(e.target.value)} />
           </>

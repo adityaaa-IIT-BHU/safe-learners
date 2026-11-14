@@ -305,7 +305,7 @@ export const DRIVING_EXPERIENCE: Record<DrivingExperience, string> = {
 // events: instructor-only blocks (personal time / time off); open: extra open hours outside the weekly schedule
 export type BookingKind = 'lesson' | 'event' | 'open';
 
-export type PaymentStatus = 'unpaid' | 'paid' | 'refunded' | 'charged';
+export type PaymentStatus = 'unpaid' | 'part_paid' | 'paid' | 'refunded' | 'charged';
 
 export interface BookingHistoryEntry {
   at: Date;
@@ -339,6 +339,8 @@ export interface Booking {
   testBooked?: boolean;
   price?: number;
   paymentStatus?: PaymentStatus;
+  /** Amount taken from the learner's wallet for this lesson (the rest, if any, is paid before the lesson). */
+  walletPaid?: number;
   proposedBy?: 'learner' | 'instructor';
   /** Proposals only: when an unanswered proposal lapses and frees the time. */
   expiresAt?: Date;
@@ -530,6 +532,17 @@ export function placeInAreas(place: PlaceInput, areas: ServiceArea[]): boolean {
     return place.lat !== undefined && place.lng !== undefined && a.lat !== undefined && a.lng !== undefined
       && distanceKm({ lat: place.lat, lng: place.lng }, { lat: a.lat, lng: a.lng }) <= NEARBY_KM;
   });
+}
+
+/** How much of a lesson was paid from the wallet. Bookings from before `walletPaid` only recorded 'paid' (the full price). */
+export function walletPaidOf(b: Pick<Booking, 'walletPaid' | 'paymentStatus' | 'price'>): number {
+  if (typeof b.walletPaid === 'number') return b.walletPaid;
+  return b.paymentStatus === 'paid' ? b.price ?? 0 : 0;
+}
+
+/** Wallet credit can still be returned for this lesson (paid in full or in part, not yet refunded or kept as a fee). */
+export function refundableFromWallet(b: Pick<Booking, 'walletPaid' | 'paymentStatus' | 'price'>): number {
+  return b.paymentStatus === 'paid' || b.paymentStatus === 'part_paid' ? walletPaidOf(b) : 0;
 }
 
 /** Suburbs extra open hours are limited to; empty means any of the instructor's suburbs. Older entries hold one `area`. */
@@ -824,6 +837,7 @@ export function normaliseBooking(id: string, raw: Record<string, any>, toDate: (
     testBooked: typeof raw.testBooked === 'boolean' ? raw.testBooked : undefined,
     price: typeof raw.price === 'number' ? raw.price : undefined,
     paymentStatus: raw.paymentStatus ?? (raw.status === 'CANCELLED_CHARGED' ? 'charged' : undefined),
+    walletPaid: typeof raw.walletPaid === 'number' ? raw.walletPaid : undefined,
     proposedBy: raw.proposedBy,
     expiresAt: toDate(raw.expiresAt),
     cancelledBy: raw.cancelledBy,

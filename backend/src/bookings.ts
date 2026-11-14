@@ -46,11 +46,12 @@ import {
   historyEntry,
   instructorBookings,
   notify,
+  payFromWallet,
+  refundToWallet,
   requireAuth,
   requireUser,
   reserveRef,
   userFrom,
-  walletEntry,
 } from './core';
 
 const opts = { region: 'australia-southeast1', cors: true };
@@ -336,11 +337,10 @@ export const createBooking = onCall(opts, async req => {
 
     // Moving a confirmed lesson: release and refund the old one first.
     if (old && old.status === 'confirmed') {
-      if (old.paymentStatus === 'paid' && old.price) {
-        balance = walletEntry(tx, learnerId, balance, old.price, { type: 'refund', note: `Rescheduled ${old.ref ?? ''}`.trim(), bookingId: old.id });
-      }
+      const back = refundToWallet(tx, old, balance, `Rescheduled ${old.ref ?? ''}`.trim());
+      balance = back.balance;
       tx.update(db.doc(`bookings/${old.id}`), {
-        ...bookingFields({ ...old, status: 'cancelled', cancelledBy: 'learner', paymentStatus: old.paymentStatus === 'paid' ? 'refunded' : old.paymentStatus }),
+        ...bookingFields({ ...old, status: 'cancelled', cancelledBy: 'learner', paymentStatus: back.paymentStatus }),
         rescheduledTo: bookingRef.id,
         history: FieldValue.arrayUnion(historyEntry('Rescheduled to a new time', 'learner', learner.firstName)),
       });
@@ -348,8 +348,7 @@ export const createBooking = onCall(opts, async req => {
       tx.update(db.doc(`bookings/${old.id}`), { ...bookingFields(old), rescheduledTo: bookingRef.id });
     }
 
-    const paid = balance >= price;
-    if (paid) balance = walletEntry(tx, learnerId, balance, -price, { type: 'booking', note: `Booking ${ref.value}`, bookingId: bookingRef.id });
+    const payment = payFromWallet(tx, learnerId, balance, price, { id: bookingRef.id, ref: ref.value });
 
     ref.commit();
     const booking: Booking = {
@@ -375,7 +374,8 @@ export const createBooking = onCall(opts, async req => {
       experience,
       testBooked,
       price,
-      paymentStatus: paid ? 'paid' : 'unpaid',
+      paymentStatus: payment.paymentStatus,
+      walletPaid: payment.walletPaid || undefined,
       proposedBy: 'learner',
       rescheduledFrom: old?.id,
     };
@@ -441,12 +441,10 @@ export const proposeBooking = onCall(opts, async req => {
     if (!learner || learner.role !== 'learner') fail('Learner not found.', 'not-found');
     const existing = await instructorBookings(tx, instructorId);
     const old = rescheduleOf ? bookingFrom(await tx.get(db.doc(`bookings/${rescheduleOf}`))) : null;
-    if (rescheduleOf && (!old || old.instructorId !== instructorId)) fail('Original booking not found.', 'not-found');
+    if (rescheduleOf && (!old || old.instructorId !== instructorId || old.learnerId !== learnerId)) fail('Original booking not found.', 'not-found');
     if (old && !['confirmed', 'late_cancel_requested', 'cancelled'].includes(old.status)) fail('This booking can no longer be rescheduled.');
     const tz = tzOf(instructor);
     const ref = await reserveRef(tx, startAt, tz);
-    const learnerSnap = old?.status === 'confirmed' && old.paymentStatus === 'paid' ? learner : null;
-
     const exclude = old ? [old.id] : [];
     // Same suburb rules as learner bookings, even for custom times.
     assertLocations(instructor, existing, startAt, endAt, [{ label: 'pick up', place: pickup }]);
@@ -454,11 +452,11 @@ export const proposeBooking = onCall(opts, async req => {
     else assertWithinHours(instructor, existing, startAt, minutes, exclude, pickup);
 
     if (old && old.status !== 'cancelled') {
-      if (learnerSnap && old.price) {
-        walletEntry(tx, learnerId, learnerSnap.walletBalance ?? 0, old.price, { type: 'refund', note: `Rescheduled ${old.ref ?? ''}`.trim(), bookingId: old.id });
-      }
+      // Covers a lesson waiting on a late-cancellation decision too: its credit used to be marked
+      // refunded without going back to the wallet.
+      const back = refundToWallet(tx, old, learner.walletBalance ?? 0, `Rescheduled ${old.ref ?? ''}`.trim());
       tx.update(db.doc(`bookings/${old.id}`), {
-        ...bookingFields({ ...old, status: 'cancelled', cancelledBy: 'instructor', paymentStatus: old.paymentStatus === 'paid' ? 'refunded' : old.paymentStatus }),
+        ...bookingFields({ ...old, status: 'cancelled', cancelledBy: 'instructor', paymentStatus: back.paymentStatus }),
         rescheduledTo: bookingRef.id,
         history: FieldValue.arrayUnion(historyEntry('Cancelled and rescheduled by instructor', 'instructor', instructor.firstName)),
       });
@@ -539,13 +537,11 @@ export const respondToProposal = onCall(opts, async req => {
     if (booking.startAt.getTime() < Date.now()) fail('This proposed time has already passed.');
     assertSlotFree(existing, booking.startAt, booking.endAt, { excludeIds: [booking.id] });
 
-    let paymentStatus = booking.paymentStatus ?? 'unpaid';
-    if (booking.price && (learner.walletBalance ?? 0) >= booking.price) {
-      walletEntry(tx, learnerId, learner.walletBalance ?? 0, -booking.price, { type: 'booking', note: `Booking ${booking.ref ?? ''}`.trim(), bookingId });
-      paymentStatus = 'paid';
-    }
+    const payment = booking.price
+      ? payFromWallet(tx, learnerId, learner.walletBalance ?? 0, booking.price, booking)
+      : { walletPaid: 0, paymentStatus: booking.paymentStatus ?? 'unpaid' };
     tx.update(db.doc(`bookings/${bookingId}`), {
-      ...bookingFields({ ...booking, status: 'confirmed', paymentStatus }),
+      ...bookingFields({ ...booking, status: 'confirmed', paymentStatus: payment.paymentStatus, walletPaid: payment.walletPaid || undefined }),
       history: FieldValue.arrayUnion(historyEntry('Accepted the proposal', 'learner', learner.firstName)),
     });
     return { booking: { ...booking, status: 'confirmed' as const }, learnerName: learner.firstName };
@@ -610,16 +606,14 @@ export const cancelBooking = onCall(opts, async req => {
       return { booking, result: 'requested' as const, actor };
     }
 
-    let paymentStatus = booking.paymentStatus;
-    if (booking.paymentStatus === 'paid' && booking.price && learner) {
-      walletEntry(tx, learner.id, learner.walletBalance ?? 0, booking.price, { type: 'refund', note: `Cancelled ${booking.ref ?? ''}`.trim(), bookingId });
-      paymentStatus = 'refunded';
-    }
+    const back = learner
+      ? refundToWallet(tx, booking, learner.walletBalance ?? 0, `Cancelled ${booking.ref ?? ''}`.trim())
+      : { paymentStatus: booking.paymentStatus, refunded: 0 };
     tx.update(db.doc(`bookings/${bookingId}`), {
-      ...bookingFields({ ...booking, status: 'cancelled', cancelledBy: actor, paymentStatus, cancellationReason: reason || undefined }),
+      ...bookingFields({ ...booking, status: 'cancelled', cancelledBy: actor, paymentStatus: back.paymentStatus, cancellationReason: reason || undefined }),
       history: FieldValue.arrayUnion(historyEntry(reason ? `Cancelled: “${reason}”` : 'Cancelled', actor, actorName)),
     });
-    return { booking, result: 'cancelled' as const, actor, refunded: paymentStatus === 'refunded' };
+    return { booking, result: 'cancelled' as const, actor, refunded: back.refunded > 0 };
   });
 
   const { booking, result, actor } = outcome;
@@ -658,24 +652,28 @@ export const resolveLateCancel = onCall(opts, async req => {
     if (booking.status !== 'late_cancel_requested') fail('There is no pending cancellation request for this booking.');
     const learner = booking.learnerId ? userFrom(await tx.get(db.doc(`users/${booking.learnerId}`))) : null;
     let paymentStatus = booking.paymentStatus;
-    if (decision === 'refund' && booking.paymentStatus === 'paid' && booking.price && learner) {
-      walletEntry(tx, learner.id, learner.walletBalance ?? 0, booking.price, { type: 'refund', note: `Cancelled ${booking.ref ?? ''}`.trim(), bookingId });
-      paymentStatus = 'refunded';
+    let refunded = 0;
+    if (decision === 'refund' && learner) {
+      const back = refundToWallet(tx, booking, learner.walletBalance ?? 0, `Cancelled ${booking.ref ?? ''}`.trim());
+      paymentStatus = back.paymentStatus;
+      refunded = back.refunded;
     } else if (decision === 'charge') {
+      // Any credit already taken is kept as the fee; the rest of the fee is settled outside the wallet.
       paymentStatus = 'charged';
     }
     tx.update(db.doc(`bookings/${bookingId}`), {
       ...bookingFields({ ...booking, status: 'cancelled', cancelledBy: 'learner', paymentStatus }),
       history: FieldValue.arrayUnion(historyEntry(decision === 'refund' ? 'Approved the cancellation with a refund' : 'Approved the cancellation with a fee', 'instructor', booking.instructorName)),
     });
-    return booking;
+    return { ...booking, refunded };
   });
 
   await notify(booking.learnerId, {
     type: 'late_cancel_resolved',
     title: `Cancellation of ${booking.ref ?? 'your booking'} approved`,
     body: decision === 'refund'
-      ? `${booking.instructorName} cancelled your lesson on ${when(booking)} and the credit is back in your wallet. You can book a new time any time.`
+      ? `${booking.instructorName} cancelled your lesson on ${when(booking)} without a fee.` +
+        (booking.refunded > 0 ? ` $${booking.refunded.toFixed(2)} is back in your wallet.` : '') + ' You can book a new time any time.'
       : `${booking.instructorName} cancelled your lesson on ${when(booking)}. A late cancellation fee applies.`,
     link: `/learner/bookings/${booking.id}`,
   });

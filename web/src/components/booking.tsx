@@ -6,13 +6,14 @@ import {
   STATUS_META,
   displayRef,
   isExpiredProposal,
+  walletPaidOf,
   type Booking,
   type LessonType,
   type PlaceInput,
 } from '@shared/domain';
 import { DEFAULT_TIMEZONE, addDaysToKey, dayKey, formatDate, formatInZone, formatTime, formatTimeRange, startOfDayKey } from '@shared/time';
 import { api, errorMessage } from '@/lib/api';
-import { Avatar, Badge, Button, Skeleton, cx } from './ui';
+import { Avatar, Badge, Button, Skeleton, cx, formatMoney } from './ui';
 
 export function StatusBadge({ booking }: { booking: Pick<Booking, 'status' | 'expiresAt' | 'createdAt' | 'startAt'> }) {
   // A lapsed proposal shows as expired before the scheduled job updates it.
@@ -23,12 +24,33 @@ export function StatusBadge({ booking }: { booking: Pick<Booking, 'status' | 'ex
 export function PaymentBadge({ booking }: { booking: Pick<Booking, 'paymentStatus'> }) {
   const map = {
     paid: { tone: 'green', label: 'Paid from wallet' },
+    part_paid: { tone: 'amber', label: 'Part paid from wallet' },
     unpaid: { tone: 'slate', label: 'Payment due' },
     refunded: { tone: 'blue', label: 'Refunded' },
     charged: { tone: 'red', label: 'Late cancellation fee' },
   } as const;
   const m = map[booking.paymentStatus ?? 'unpaid'];
   return <Badge tone={m.tone}>{m.label}</Badge>;
+}
+
+/** How a lesson's price was settled: from the wallet, still due, or returned. */
+export function PaymentLines({ booking }: { booking: Pick<Booking, 'paymentStatus' | 'walletPaid' | 'price' | 'status'> }) {
+  const price = booking.price ?? 0;
+  const fromWallet = walletPaidOf(booking);
+  const lines: [string, number][] = [];
+  if (fromWallet > 0) lines.push([booking.paymentStatus === 'refunded' ? 'Returned to your wallet' : 'Paid from wallet', fromWallet]);
+  const due = price - fromWallet;
+  if (due > 0 && ['unpaid', 'part_paid'].includes(booking.paymentStatus ?? 'unpaid') && ['confirmed', 'proposed', 'late_cancel_requested'].includes(booking.status)) {
+    lines.push(['Due before the lesson', due]);
+  }
+  if (!lines.length) return null;
+  return (
+    <dl className="space-y-1 text-sm">
+      {lines.map(([label, amount]) => (
+        <div key={label} className="flex justify-between gap-6"><dt className="text-ink-500">{label}</dt><dd className="font-semibold">{formatMoney(amount)}</dd></div>
+      ))}
+    </dl>
+  );
 }
 
 export function lessonLabel(b: Booking): string {

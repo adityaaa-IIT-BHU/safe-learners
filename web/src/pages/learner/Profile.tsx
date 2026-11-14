@@ -24,6 +24,8 @@ export function LearnerProfile() {
   useEffect(() => { if (priv?.dob) setForm(f => ({ ...f, dob: f.dob || priv.dob })); }, [priv?.dob]);
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }));
+  // The sign-in email of the account on screen; an admin viewing a learner sees the learner's, not their own.
+  const signInEmail = readOnly ? me.email ?? priv?.email : user?.email;
 
   return (
     <>
@@ -54,14 +56,18 @@ export function LearnerProfile() {
             <Input label="Mobile" type="tel" value={form.mobile} onChange={set('mobile')} />
             <Input label="Date of birth" type="date" value={form.dob} onChange={set('dob')} />
             <Input label="Usual pick up address" value={form.homeSuburb} onChange={set('homeSuburb')} placeholder="Pre-fills when you book" wrapperClassName="sm:col-span-2" />
-            <Input label="Email" value={user?.email ?? me.email ?? ''} disabled wrapperClassName="sm:col-span-2" hint="Contact support to change your sign-in email." />
+            <Input label="Email" value={signInEmail ?? ''} disabled wrapperClassName="sm:col-span-2" hint="Contact support to change your sign-in email." />
             <div className="sm:col-span-2"><Button type="submit" loading={saving} disabled={readOnly}>Save changes</Button></div>
           </form>
         </Card>
         <Card className="h-fit p-5">
           <KeyRound className="size-6 text-ink-400" />
           <h3 className="mt-3 font-bold">Password</h3>
-          <p className="mt-1 text-sm text-ink-500">We’ll email you a secure link to set a new password.</p>
+          <p className="mt-1 text-sm text-ink-500">
+            {readOnly
+              ? `Only ${me.firstName || 'the learner'} can request this, from their own account or the sign-in page. The link goes to ${signInEmail ?? 'their sign-in email'}.`
+              : <>We’ll email a secure link to <strong className="break-all text-ink-700 dark:text-ink-200">{user?.email}</strong>, the email you sign in with. It works once and expires after an hour.</>}
+          </p>
           <Button
             variant="secondary"
             className="mt-4"

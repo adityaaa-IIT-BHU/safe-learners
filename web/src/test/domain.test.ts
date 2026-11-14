@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import {
   CREDIT_PACKAGES,
   addressArea,
@@ -14,6 +14,8 @@ import {
   normaliseBooking,
   areasOrList,
   openHoursAreas,
+  refundableFromWallet,
+  walletPaidOf,
   openSlotsForDay,
   parseLegacyDate,
   parseLegacyTime,
@@ -122,7 +124,7 @@ describe('pick up and drop off suburbs', () => {
     expect(addressArea('100 George St, Sydney NSW 2000')).toEqual({ name: 'Sydney', state: 'NSW', postcode: '2000' });
     expect(addressArea('11 Kildare Rd, Blacktown NSW 2148, Australia')).toEqual({ name: 'Blacktown', state: 'NSW', postcode: '2148' });
   });
-  it('rejects addresses outside the instructor’s suburbs (client report: Sydney and Parramatta)', () => {
+  it('rejects addresses outside the instructorâ€™s suburbs (client report: Sydney and Parramatta)', () => {
     expect(placeInAreas({ address: '100 George St, Sydney NSW 2000' }, bik)).toBe(false);
     expect(placeInAreas({ address: '100 George St, Parramatta NSW 2150' }, bik)).toBe(false);
   });
@@ -288,5 +290,30 @@ describe('extra open hours in several suburbs', () => {
     expect(areasOrList([schofields])).toBe('Schofields');
     expect(areasOrList([schofields, ponds])).toBe('Schofields or The Ponds');
     expect(areasOrList([schofields, ponds, { name: 'Tallawong' }])).toBe('Schofields, The Ponds or Tallawong');
+  });
+});
+
+describe('wallet payments on a booking', () => {
+  it('reads how much came from the wallet, including bookings saved before walletPaid existed', () => {
+    expect(walletPaidOf({ paymentStatus: 'paid', price: 75 })).toBe(75);
+    expect(walletPaidOf({ paymentStatus: 'part_paid', price: 75, walletPaid: 50 })).toBe(50);
+    expect(walletPaidOf({ paymentStatus: 'unpaid', price: 75 })).toBe(0);
+    expect(walletPaidOf({ paymentStatus: 'refunded', price: 75, walletPaid: 75 })).toBe(75);
+  });
+
+  it('only returns credit that is still held for the lesson', () => {
+    expect(refundableFromWallet({ paymentStatus: 'paid', price: 75 })).toBe(75);
+    expect(refundableFromWallet({ paymentStatus: 'part_paid', price: 75, walletPaid: 50 })).toBe(50);
+    expect(refundableFromWallet({ paymentStatus: 'refunded', price: 75, walletPaid: 75 })).toBe(0);
+    expect(refundableFromWallet({ paymentStatus: 'charged', price: 75, walletPaid: 75 })).toBe(0);
+    expect(refundableFromWallet({ paymentStatus: 'unpaid', price: 75 })).toBe(0);
+    expect(refundableFromWallet({ price: 75 })).toBe(0);
+  });
+
+  it('keeps walletPaid when loading a booking', () => {
+    const raw = { kind: 'lesson', status: 'confirmed', instructorId: 'i', startAt: new Date(), endAt: new Date(), timezone: 'Australia/Sydney', price: 75, paymentStatus: 'part_paid', walletPaid: 50 };
+    const b = normaliseBooking('x', raw, d => d as Date)!;
+    expect(b.walletPaid).toBe(50);
+    expect(b.paymentStatus).toBe('part_paid');
   });
 });

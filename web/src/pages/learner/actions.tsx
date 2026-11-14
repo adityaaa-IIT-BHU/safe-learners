@@ -2,7 +2,7 @@ import { CalendarClock, Check, ChevronRight, Phone, RefreshCw, Star, UserRoundSe
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { FREE_CANCELLATION_HOURS, hoursUntil, learnerCanReschedule, learnerCanReview, type Booking } from '@shared/domain';
+import { FREE_CANCELLATION_HOURS, hoursUntil, learnerCanReschedule, learnerCanReview, refundableFromWallet, type Booking } from '@shared/domain';
 import { formatDate, formatTime } from '@shared/time';
 import { useAuth } from '@/auth/AuthProvider';
 import { Button, ButtonLink, Modal, Textarea, formatMoney } from '@/components/ui';
@@ -65,7 +65,7 @@ export function RescheduleButton({ booking, size = 'sm' }: { booking: Booking; s
             <ChangeOption to={reschedulePath(booking)} icon={<CalendarClock className="size-5" />} title={`New time with ${name}`} body="Pick another time from their live calendar." />
             <ChangeOption to={switchInstructorPath(booking)} icon={<UserRoundSearch className="size-5" />} title="Different instructor" body="Find another instructor in your area and choose a time." />
             <p className="text-xs text-ink-500">
-              Your current lesson stays booked until you confirm the new one{booking.paymentStatus === 'paid' ? ', then its credit is returned to your wallet' : ''}.
+              Your current lesson stays booked until you confirm the new one{refundableFromWallet(booking) > 0 ? `, then its ${formatMoney(refundableFromWallet(booking))} credit is returned to your wallet` : ''}.
             </p>
           </div>
         ) : (
@@ -120,7 +120,7 @@ export function CancelButton({ booking, size = 'sm' }: { booking: Booking; size?
       const res = await api.cancelBooking({ bookingId: booking.id, reason: reason.trim() || undefined });
       toast.success(res.result === 'requested'
         ? 'Cancellation request sent to your instructor.'
-        : booking.paymentStatus === 'paid' ? 'Booking cancelled — the credit is back in your wallet.' : 'Booking cancelled.');
+        : refundableFromWallet(booking) > 0 ? `Booking cancelled — ${formatMoney(refundableFromWallet(booking))} is back in your wallet.` : 'Booking cancelled.');
       setOpen(false);
     } catch (err) {
       toast.error(errorMessage(err));
@@ -151,7 +151,7 @@ export function CancelButton({ booking, size = 'sm' }: { booking: Booking; size?
         <div className={`mt-4 rounded-xl p-4 text-sm ${late ? 'bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200' : 'bg-emerald-50 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200'}`}>
           {late
             ? <>This lesson is less than {FREE_CANCELLATION_HOURS} hours away. Your instructor will decide whether to refund you or charge a late cancellation fee{booking.price ? ` (up to ${formatMoney(booking.price)})` : ''}.</>
-            : <>Free cancellation: {booking.paymentStatus === 'paid' ? `${formatMoney(booking.price)} goes straight back to your wallet.` : 'nothing will be charged.'} Want a different time or instructor instead? Use Change.</>}
+            : <>Free cancellation: {refundableFromWallet(booking) > 0 ? `${formatMoney(refundableFromWallet(booking))} goes straight back to your wallet.` : 'nothing will be charged.'} Want a different time or instructor instead? Use Change.</>}
         </div>
         <Textarea wrapperClassName="mt-4" label="Reason (optional)" rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Let your instructor know why" />
       </Modal>

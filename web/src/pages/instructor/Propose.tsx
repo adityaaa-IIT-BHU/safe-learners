@@ -2,7 +2,7 @@ import { ArrowLeft, RefreshCw, Send, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { LESSON_TYPES, LESSON_TYPE_ORDER, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isPrivateLearner, lessonPrice, pricingFor, type LessonType } from '@shared/domain';
+import { LESSON_TYPES, LESSON_TYPE_ORDER, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isPrivateLearner, lessonPrice, pricingFor, refundableFromWallet, type LessonType } from '@shared/domain';
 import { DEFAULT_TIMEZONE, atLocalTime, dayKey, formatDate, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { AddressInput, EMPTY_ADDRESS, areaProblem, placeOf, type AddressValue } from '@/components/AddressInput';
@@ -93,7 +93,7 @@ export function Propose() {
       {rescheduleId && original && (
         <div className="mb-6 flex gap-3 rounded-2xl bg-red-50 p-4 text-sm text-red-900 dark:bg-red-500/10 dark:text-red-200">
           <RefreshCw className="mt-0.5 size-4 shrink-0" />
-          <span>Proposing will <strong>cancel {displayRef(original)}</strong> ({formatDate(original.startAt, original.timezone)}, {formatTimeRange(original.startAt, original.endAt, original.timezone)}){original.paymentStatus === 'paid' ? ' and refund it to the learner’s wallet' : ''}.</span>
+          <span>Proposing will <strong>cancel {displayRef(original)}</strong> ({formatDate(original.startAt, original.timezone)}, {formatTimeRange(original.startAt, original.endAt, original.timezone)}){refundableFromWallet(original) > 0 ? ` and refund ${formatMoney(refundableFromWallet(original))} to the learner’s wallet` : ''}.</span>
         </div>
       )}
 

@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { DRIVING_EXPERIENCE, LESSON_TYPES, PROPOSAL_EXPIRY_HOURS, displayRef, fullName, isExpiredProposal, learnerCanReview, proposalExpiry, type Booking } from '@shared/domain';
 import { formatDate, formatTime, formatTimeRange } from '@shared/time';
 import { useAuth } from '@/auth/AuthProvider';
-import { AddToCalendarButton, BookingTimeline, PaymentBadge, StatusBadge } from '@/components/booking';
+import { AddToCalendarButton, BookingTimeline, PaymentBadge, PaymentLines, StatusBadge } from '@/components/booking';
 import { Avatar, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, PageLoader, formatMoney } from '@/components/ui';
 import { useBooking, useUser } from '@/lib/data';
 import { CancelButton, ProposalActions, RescheduleButton, ReviewModal } from './actions';
@@ -67,6 +67,7 @@ export function LearnerBookingDetail() {
               </div>
               <p className="text-3xl font-extrabold">{formatMoney(booking.price)}</p>
             </div>
+            <div className="px-5 pb-5 empty:hidden"><PaymentLines booking={booking} /></div>
           </Card>
 
           <Card>

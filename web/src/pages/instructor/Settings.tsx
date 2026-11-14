@@ -129,7 +129,7 @@ export function InstructorSettings() {
         <Card className="h-fit p-5">
           <KeyRound className="size-6 text-ink-400" />
           <h3 className="mt-3 font-bold">Password</h3>
-          <p className="mt-1 text-sm text-ink-500">Signed in as {user?.email}. We’ll email you a secure link to set a new password.</p>
+          <p className="mt-1 text-sm text-ink-500">We’ll email a secure link to <strong className="break-all text-ink-700 dark:text-ink-200">{user?.email}</strong>, the email you sign in with. It works once and expires after an hour.</p>
           <Button variant="secondary" className="mt-4" disabled={readOnly || !user?.email} onClick={async () => {
             try {
               await sendPasswordResetEmail(auth, user!.email!);

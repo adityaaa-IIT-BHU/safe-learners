@@ -8,8 +8,10 @@ import {
   formatBookingRef,
   normaliseBooking,
   normaliseUser,
+  refundableFromWallet,
   type Booking,
   type BookingHistoryEntry,
+  type PaymentStatus,
   type UserProfile,
 } from '../../shared/domain';
 
@@ -100,7 +102,7 @@ export function bookingFields(b: Booking): Record<string, unknown> {
   };
   const optional: (keyof Booking)[] = [
     'ref', 'instructorName', 'instructorMobile', 'learnerId', 'learnerName', 'lessonType', 'title', 'transmission', 'pickupLocation',
-    'dropoffLocation', 'testLocation', 'testLocationAddress', 'notes', 'experience', 'testBooked', 'price', 'paymentStatus', 'proposedBy', 'cancelledBy',
+    'dropoffLocation', 'testLocation', 'testLocationAddress', 'notes', 'experience', 'testBooked', 'price', 'paymentStatus', 'walletPaid', 'proposedBy', 'cancelledBy',
     'cancellationReason', 'rescheduledFrom', 'rescheduledTo', 'reviewed', 'applyBuffer', 'area', 'areas', 'repeatGroupId',
   ];
   for (const key of optional) if (b[key] !== undefined) out[key] = b[key];
@@ -151,6 +153,44 @@ export function walletEntry(
     createdAt: FieldValue.serverTimestamp(),
   });
   return balanceAfter;
+}
+
+const dollars = (n: number) => `$${n.toFixed(2)}`;
+
+/**
+ * Pays a lesson from the wallet inside a transaction: the full price when the balance covers it,
+ * otherwise whatever credit there is (the rest is due before the lesson), or nothing at a $0 balance.
+ */
+export function payFromWallet(
+  tx: Transaction,
+  learnerId: string,
+  balance: number,
+  price: number,
+  booking: { id: string; ref?: string },
+): { balance: number; walletPaid: number; paymentStatus: PaymentStatus } {
+  const take = Math.round(Math.min(Math.max(balance, 0), price) * 100) / 100;
+  if (!(take > 0)) return { balance, walletPaid: 0, paymentStatus: 'unpaid' };
+  const full = take >= price;
+  const ref = booking.ref ?? '';
+  const note = full ? `Booking ${ref}`.trim() : `Booking ${ref} (part payment, ${dollars(price - take)} still due)`.replace('  ', ' ');
+  const after = walletEntry(tx, learnerId, balance, -take, { type: 'booking', note, bookingId: booking.id });
+  return { balance: after, walletPaid: take, paymentStatus: full ? 'paid' : 'part_paid' };
+}
+
+/**
+ * Returns to the wallet exactly what a lesson took from it, once. A booking that wasn't paid from the
+ * wallet, or was already refunded or kept as a fee, is left as it is.
+ */
+export function refundToWallet(
+  tx: Transaction,
+  booking: Booking,
+  balance: number,
+  note: string,
+): { balance: number; paymentStatus: PaymentStatus | undefined; refunded: number } {
+  const amount = refundableFromWallet(booking);
+  if (!(amount > 0) || !booking.learnerId) return { balance, paymentStatus: booking.paymentStatus, refunded: 0 };
+  const after = walletEntry(tx, booking.learnerId, balance, amount, { type: 'refund', note, bookingId: booking.id });
+  return { balance: after, paymentStatus: 'refunded', refunded: amount };
 }
 
 // ---------- Notifications ----------
