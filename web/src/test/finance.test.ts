@@ -79,6 +79,9 @@ test('invoice statuses', () => {
   assert.equal(invoiceStatusOf({ ...inv, amountPaid: 75 }, '2026-11-16'), 'paid');
   assert.equal(invoiceStatusOf({ ...inv, amountPaid: 40, amountCredited: 35 }, '2026-11-16'), 'credited');
   assert.equal(invoiceStatusOf({ ...inv, voided: true }, '2026-11-16'), 'voided');
+  // A fully paid lesson cancelled with a credit note shows Credited, not Paid.
+  assert.equal(invoiceStatusOf({ ...inv, amountPaid: 75, closed: 'credited' }, '2026-11-16'), 'credited');
+  assert.equal(invoiceStatusOf({ ...inv, amountPaid: 75, closed: 'fee_kept' }, '2026-11-16'), 'credited');
 });
 
 test('settings: nothing can be switched on until every required account is chosen', () => {

@@ -225,10 +225,12 @@ export const INVOICE_STATUS: Record<InvoiceStatus, { label: string; tone: 'slate
  * Credited = cancelled after payment (a credit note covers the rest).
  */
 export function invoiceStatusOf(
-  inv: { voided?: boolean; total: number; amountPaid: number; amountCredited: number; dueDate: string },
+  inv: { voided?: boolean; closed?: string | null; total: number; amountPaid: number; amountCredited: number; dueDate: string },
   today: string,
 ): InvoiceStatus {
   if (inv.voided) return 'voided';
+  // Cancelled after payment: a credit note closed it, even when nothing was left to settle (fully paid).
+  if (inv.closed === 'credited' || inv.closed === 'fee_kept') return 'credited';
   const due = money(inv.total - inv.amountPaid - inv.amountCredited);
   if (inv.amountCredited > CENT && due <= CENT) return 'credited';
   if (due <= CENT) return 'paid';
