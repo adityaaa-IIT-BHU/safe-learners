@@ -129,6 +129,18 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && resource.data.referrerId == request.auth.uid);
     }
 
+    // Xero integration: admins can read status, settings, mapping lists, jobs and logs. Tokens
+    // (integrations/xero) and OAuth state values are never readable from the browser.
+    match /integrations/{doc} {
+      allow read: if isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups'];
+    }
+    match /xeroSyncJobs/{id} {
+      allow read: if isAdmin();
+    }
+    match /xeroSyncLog/{id} {
+      allow read: if isAdmin();
+    }
+
     // Everything else (counters, legacy collections) is server-only.
     match /{document=**} {
       allow read, write: if false;

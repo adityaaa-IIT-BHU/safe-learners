@@ -1,5 +1,6 @@
 import { doc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
+  ArrowLeftRight,
   BadgeCheck,
   Bell,
   CalendarDays,
@@ -72,6 +73,7 @@ const NAV: Record<Role, NavItem[]> = {
     { to: '/admin/users', label: 'Users', icon: Users },
     { to: '/admin/bookings', label: 'Bookings', icon: CalendarDays },
     { to: '/admin/reviews', label: 'Reviews', icon: Star },
+    { to: '/admin/xero', label: 'Xero', icon: ArrowLeftRight },
     { to: '/admin/tools', label: 'Tools', icon: Wrench },
   ],
 };

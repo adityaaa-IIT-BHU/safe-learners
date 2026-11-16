@@ -29,3 +29,15 @@ export {
 export { applyPriceChanges, completeLessons, expireProposals, lessonReminders } from './scheduled';
 export { reviewDocument, scanDocument, submitDocument } from './documents';
 export { setReviewHidden } from './reviews';
+export {
+  xeroCallback,
+  xeroCheckConnection,
+  xeroConfigStatus,
+  xeroConnectUrl,
+  xeroDisconnect,
+  xeroHealthCheck,
+  xeroRetry,
+  xeroSaveSettings,
+  xeroSyncNow,
+  xeroSyncWorker,
+} from './xero';

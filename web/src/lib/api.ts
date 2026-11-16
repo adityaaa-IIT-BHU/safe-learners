@@ -124,6 +124,13 @@ export const api = {
   setAccountStatus: callable<{ uid: string; status: 'active' | 'disabled' }, { ok: true }>('setAccountStatus'),
   adjustWallet: callable<{ uid: string; amount: number; note?: string }, { balance: number }>('adjustWallet'),
   migrateLegacyBookings: callable<Record<string, never>, { migrated: number; skipped: number }>('migrateLegacyBookings'),
+  xeroConfigStatus: callable<Record<string, never>, { missing: string[]; scopes: string[]; redirectUri: string }>('xeroConfigStatus'),
+  xeroConnectUrl: callable<Record<string, never>, { url: string }>('xeroConnectUrl'),
+  xeroDisconnect: callable<Record<string, never>, { ok: true }>('xeroDisconnect'),
+  xeroCheckConnection: callable<Record<string, never>, { ok: true; name: string; organisationClass: string }>('xeroCheckConnection'),
+  xeroSyncNow: callable<Record<string, never>, { processed: number; stopped?: string }>('xeroSyncNow'),
+  xeroRetry: callable<{ jobId?: string }, { retried: number }>('xeroRetry'),
+  xeroSaveSettings: callable<{ startDate: string | null; invoiceStatus: 'DRAFT' | 'AUTHORISED'; requireApproval: boolean }, { ok: true }>('xeroSaveSettings'),
   scanDocument: callable<
     { key: VerificationStepKey; path: string },
     { found: boolean; reason?: string; number?: string; expiry?: string; state?: string }
