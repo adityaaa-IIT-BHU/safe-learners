@@ -30,6 +30,22 @@ export { applyPriceChanges, completeLessons, expireProposals, lessonReminders } 
 export { reviewDocument, scanDocument, submitDocument } from './documents';
 export { setReviewHidden } from './reviews';
 export {
+  cancelApprovedRefund,
+  confirmRefundTransfer,
+  decideRefund,
+  financeOnBookingWrite,
+  financeOnLearnerWrite,
+  financeOnWalletEntry,
+  financeRetry,
+  financeSaveSettings,
+  payInvoiceFromWallet,
+  requestRefund,
+  resolveCustomerMatch,
+} from './finance';
+// Registers the Xero handler for finance ledger entries.
+import './financeXero';
+export { financeReconcileNightly, financeReconcileNow, resolveReconciliationIssue } from './reconcile';
+export {
   xeroCallback,
   xeroCheckConnection,
   xeroConfigStatus,

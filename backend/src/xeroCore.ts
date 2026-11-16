@@ -6,11 +6,15 @@ export const XERO_LOGIN_URL = (process.env.XERO_LOGIN_URL || 'https://login.xero
 export const XERO_API_URL = (process.env.XERO_API_URL || 'https://api.xero.com').replace(/\/$/, '');
 
 /**
- * Granular scopes (required for Xero apps created after 2 March 2026). Foundation only: identity, refresh
- * and read-only settings for mapping. Contacts / invoices / payments scopes are added once the client
- * confirms which records sync; adding a scope later just means reconnecting.
+ * Granular scopes (required for Xero apps created after 2 March 2026): identity and refresh, read-only
+ * settings for the account/tax pickers, and write access to exactly the records the finance sync creates
+ * (contacts, invoices and credit notes, payments/refunds and allocations, prepayment bank transactions).
+ * No payroll, reports, files or other access. A change here means an admin reconnects once.
  */
-export const XERO_SCOPES = ['openid', 'profile', 'email', 'offline_access', 'accounting.settings.read'];
+export const XERO_SCOPES = [
+  'openid', 'profile', 'email', 'offline_access',
+  'accounting.settings.read', 'accounting.contacts', 'accounting.invoices', 'accounting.payments', 'accounting.banktransactions',
+];
 
 /** Xero refresh tokens last 60 days from their last use; Xero doesn't return the expiry, so we track it. */
 export const REFRESH_TOKEN_DAYS = 60;

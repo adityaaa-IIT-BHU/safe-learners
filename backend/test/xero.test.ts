@@ -47,7 +47,11 @@ test('consent URL uses the authorisation code flow with granular scopes and the 
   assert.deepEqual(scopes, XERO_SCOPES);
   assert.ok(scopes.includes('offline_access'));
   assert.ok(!scopes.includes('accounting.transactions'), 'broad scope not requested');
-  assert.ok(!scopes.some(s => !s.endsWith('.read') && s.startsWith('accounting.')), 'foundation is read-only');
+  // Least privilege: write access only to the records the finance sync creates; settings read-only.
+  const writes = scopes.filter(s => s.startsWith('accounting.') && !s.endsWith('.read')).sort();
+  assert.deepEqual(writes, ['accounting.banktransactions', 'accounting.contacts', 'accounting.invoices', 'accounting.payments']);
+  assert.ok(scopes.includes('accounting.settings.read') && !scopes.includes('accounting.settings'));
+  assert.ok(!scopes.some(s => /payroll|reports|attachments|journals|files|assets|projects/.test(s)));
 });
 
 test('job IDs are stable per record (duplicate guard) and safe as document IDs', () => {

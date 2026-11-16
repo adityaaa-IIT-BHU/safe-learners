@@ -132,12 +132,36 @@ service cloud.firestore {
     // Xero integration: admins can read status, settings, mapping lists, jobs and logs. Tokens
     // (integrations/xero) and OAuth state values are never readable from the browser.
     match /integrations/{doc} {
-      allow read: if isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups'];
+      allow read: if isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus'];
     }
     match /xeroSyncJobs/{id} {
       allow read: if isAdmin();
     }
     match /xeroSyncLog/{id} {
+      allow read: if isAdmin();
+    }
+
+    // Finance (written only by Cloud Functions). Learners see their own invoices and refund requests;
+    // admins read everything. Nobody, admins included, can edit or delete the audit trail.
+    match /invoices/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.learnerId == request.auth.uid);
+    }
+    match /refundRequests/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+    }
+    match /financeTransactions/{id} {
+      allow read: if isAdmin();
+    }
+    match /financeCustomers/{id} {
+      allow read: if isAdmin();
+    }
+    match /financeAudit/{id} {
+      allow read: if isAdmin();
+    }
+    match /reconciliationIssues/{id} {
+      allow read: if isAdmin();
+    }
+    match /reconciliationRuns/{id} {
       allow read: if isAdmin();
     }
 

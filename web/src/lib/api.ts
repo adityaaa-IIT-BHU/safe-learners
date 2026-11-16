@@ -122,15 +122,27 @@ export const api = {
 
   reviewVerification: callable<{ uid: string; approve: boolean; reason?: string }, { ok: true }>('reviewVerification'),
   setAccountStatus: callable<{ uid: string; status: 'active' | 'disabled' }, { ok: true }>('setAccountStatus'),
-  adjustWallet: callable<{ uid: string; amount: number; note?: string }, { balance: number }>('adjustWallet'),
+  adjustWallet: callable<
+    { uid: string; amount: number; note?: string; category?: 'payment_received' | 'goodwill' | 'correction'; paymentMethod?: string; paymentReference?: string },
+    { balance: number }
+  >('adjustWallet'),
   migrateLegacyBookings: callable<Record<string, never>, { migrated: number; skipped: number }>('migrateLegacyBookings'),
-  xeroConfigStatus: callable<Record<string, never>, { missing: string[]; scopes: string[]; redirectUri: string }>('xeroConfigStatus'),
+  xeroConfigStatus: callable<Record<string, never>, { missing: string[]; scopes: string[]; redirectUri: string; needsReconnect: boolean }>('xeroConfigStatus'),
+  financeSaveSettings: callable<Record<string, unknown>, { ok: true; missing: string[] }>('financeSaveSettings'),
+  financeRetry: callable<{ txId?: string }, { retried: number }>('financeRetry'),
+  financeReconcileNow: callable<Record<string, never>, { issues: number; checked: Record<string, number>; skippedCustomers: number }>('financeReconcileNow'),
+  resolveReconciliationIssue: callable<{ id: string; note: string }, { ok: true }>('resolveReconciliationIssue'),
+  resolveCustomerMatch: callable<{ customerId: string; action: 'link' | 'create' }, { ok: true }>('resolveCustomerMatch'),
+  payInvoiceFromWallet: callable<{ invoiceId: string }, { paid: number }>('payInvoiceFromWallet'),
+  requestRefund: callable<{ amount: number; reason: string; sourceTxId?: string; invoiceId?: string; customerId?: string }, { id: string; number: string }>('requestRefund'),
+  decideRefund: callable<{ id: string; approve: boolean; reason?: string }, { ok: true }>('decideRefund'),
+  confirmRefundTransfer: callable<{ id: string; transferReference: string; transferDate: string }, { ok: true }>('confirmRefundTransfer'),
+  cancelApprovedRefund: callable<{ id: string; reason: string }, { ok: true }>('cancelApprovedRefund'),
   xeroConnectUrl: callable<Record<string, never>, { url: string }>('xeroConnectUrl'),
   xeroDisconnect: callable<Record<string, never>, { ok: true }>('xeroDisconnect'),
   xeroCheckConnection: callable<Record<string, never>, { ok: true; name: string; organisationClass: string }>('xeroCheckConnection'),
   xeroSyncNow: callable<Record<string, never>, { processed: number; stopped?: string }>('xeroSyncNow'),
   xeroRetry: callable<{ jobId?: string }, { retried: number }>('xeroRetry'),
-  xeroSaveSettings: callable<{ startDate: string | null; invoiceStatus: 'DRAFT' | 'AUTHORISED'; requireApproval: boolean }, { ok: true }>('xeroSaveSettings'),
   scanDocument: callable<
     { key: VerificationStepKey; path: string },
     { found: boolean; reason?: string; number?: string; expiry?: string; state?: string }

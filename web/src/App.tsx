@@ -29,6 +29,7 @@ const LearnerDashboard = page(() => import('@/pages/learner/Dashboard'), 'Learne
 const BookLesson = page(() => import('@/pages/learner/BookLesson'), 'BookLesson');
 const LearnerBooking = page(() => import('@/pages/learner/BookingDetail'), 'LearnerBookingDetail');
 const LearnerWallet = page(() => import('@/pages/learner/Wallet'), 'Wallet');
+const LearnerInvoices = page(() => import('@/pages/learner/Invoices'), 'LearnerInvoices');
 const Refer = page(() => import('@/pages/learner/Refer'), 'Refer');
 const LearnerProfile = page(() => import('@/pages/learner/Profile'), 'LearnerProfile');
 
@@ -57,6 +58,7 @@ const AdminUser = page(() => import('@/pages/admin/Users'), 'AdminUserDetail');
 const AdminBookings = page(() => import('@/pages/admin/Bookings'), 'AdminBookings');
 const AdminTools = page(() => import('@/pages/admin/Tools'), 'AdminTools');
 const AdminXero = page(() => import('@/pages/admin/Xero'), 'AdminXero');
+const AdminFinance = page(() => import('@/pages/admin/Finance'), 'AdminFinance');
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { user, profile, isAdmin, loading } = useAuth();
@@ -107,6 +109,7 @@ export default function App() {
               <Route path="book/:instructorId" element={<BookLesson />} />
               <Route path="bookings/:id" element={<LearnerBooking />} />
               <Route path="wallet" element={<LearnerWallet />} />
+              <Route path="invoices" element={<LearnerInvoices />} />
               <Route path="refer" element={<Refer />} />
               <Route path="support" element={<Support audience="learner" embedded />} />
               <Route path="profile" element={<LearnerProfile />} />
@@ -139,6 +142,7 @@ export default function App() {
               <Route path="reviews" element={<AdminReviews />} />
               <Route path="tools" element={<AdminTools />} />
               <Route path="xero" element={<AdminXero />} />
+              <Route path="finance" element={<AdminFinance />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

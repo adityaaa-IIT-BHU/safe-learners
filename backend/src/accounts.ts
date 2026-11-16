@@ -327,16 +327,31 @@ export const setAccountStatus = onCall(opts, async req => {
 });
 
 export const adjustWallet = onCall(opts, async req => {
-  requireAdmin(req);
+  const adminUid = requireAdmin(req);
   const uid = String(req.data?.uid || '');
   const amount = Math.round(Number(req.data?.amount) * 100) / 100;
   const note = String(req.data?.note || 'Adjustment by Safe Learners').slice(0, 200);
   if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 5000) fail('Enter an amount between -$5000 and $5000.', 'invalid-argument');
+  // What the credit is, for the accounts: only "payment_received" is treated as money received.
+  const category = amount < 0 ? 'correction' : (['payment_received', 'goodwill', 'correction'] as const).find(c => c === req.data?.category);
+  if (!category) fail('Choose what this credit is: payment received, goodwill or a correction.', 'invalid-argument');
+  const paymentMethod = category === 'payment_received' ? String(req.data?.paymentMethod || '') : '';
+  const paymentReference = String(req.data?.paymentReference || '').trim().slice(0, 100);
+  if (category === 'payment_received' && (!['bank_transfer', 'cash', 'card_terminal', 'other'].includes(paymentMethod) || !paymentReference)) {
+    fail('For a payment received, choose how it was paid and enter its reference (e.g. the bank transfer reference).', 'invalid-argument');
+  }
   const balance = await db.runTransaction(async tx => {
     const user = userFrom(await tx.get(db.doc(`users/${uid}`)));
     if (!user || user.role !== 'learner') fail('Learner not found.', 'not-found');
     if ((user.walletBalance ?? 0) + amount < 0) fail('The wallet balance can’t go below $0.');
-    return walletEntry(tx, uid, user.walletBalance ?? 0, amount, { type: amount > 0 ? 'topup' : 'adjustment', note });
+    return walletEntry(tx, uid, user.walletBalance ?? 0, amount, {
+      type: amount > 0 ? 'topup' : 'adjustment',
+      note,
+      category,
+      addedBy: adminUid,
+      ...(paymentMethod ? { paymentMethod } : {}),
+      ...(paymentReference ? { paymentReference } : {}),
+    });
   });
   await notify(uid, {
     type: 'wallet',

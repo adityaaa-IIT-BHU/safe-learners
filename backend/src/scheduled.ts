@@ -79,8 +79,8 @@ async function payReferralReward(learnerId: string) {
     if (!learner?.referredBy || (learner as any).referralRewarded) return null;
     const referrer = userFrom(await tx.get(db.doc(`users/${learner.referredBy}`)));
     if (!referrer) return null;
-    walletEntry(tx, learner.id, learner.walletBalance ?? 0, REFERRAL_REWARD_FRIEND, { type: 'referral', note: `Welcome reward from ${referrer.firstName}’s referral` });
-    walletEntry(tx, referrer.id, referrer.walletBalance ?? 0, REFERRAL_REWARD_REFERRER, { type: 'referral', note: `Referral reward for ${learner.firstName}` });
+    walletEntry(tx, learner.id, learner.walletBalance ?? 0, REFERRAL_REWARD_FRIEND, { type: 'referral', note: `Welcome reward from ${referrer.firstName}’s referral`, referralOf: `${referrer.id}>${learner.id}` });
+    walletEntry(tx, referrer.id, referrer.walletBalance ?? 0, REFERRAL_REWARD_REFERRER, { type: 'referral', note: `Referral reward for ${learner.firstName}`, referralOf: `${referrer.id}>${learner.id}` });
     tx.update(db.doc(`users/${learner.id}`), { referralRewarded: true });
     return { referrer, learner };
   });

@@ -254,7 +254,10 @@ export const xeroCheckConnection = onCall(opts, async req => {
 export const xeroConfigStatus = onCall(opts, async req => {
   requireAdmin(req);
   const { c, missing } = config();
-  return { missing, scopes: XERO_SCOPES, redirectUri: c.redirectUri };
+  const conn = (await CONN.get()).data();
+  const granted = (conn?.scopes ?? []) as string[];
+  const needsReconnect = !!conn && XERO_SCOPES.some(s => !granted.includes(s));
+  return { missing, scopes: XERO_SCOPES, redirectUri: c.redirectUri, needsReconnect };
 });
 
 // ---------- Sync queue ----------
@@ -274,8 +277,18 @@ export async function queueJob(type: string, recordId: string, payload: Record<s
 }
 
 type Handler = (job: { id: string; recordId: string; payload: Record<string, any> }) => Promise<{ xeroId?: string; summary: string }>;
+type FailureHook = (job: { id: string; type: string; recordId: string }, message: string, willRetry: boolean, err: unknown) => Promise<void>;
+const failureHooks: FailureHook[] = [];
 
-/** Job handlers. Record types (contacts, invoices, payments, credit notes) are added after client sign-off. */
+/** Other modules add their record types here (the finance ledger registers "fin"). */
+export function registerHandler(type: string, handler: Handler) {
+  HANDLERS[type] = handler;
+}
+export function onJobFailure(hook: FailureHook) {
+  failureHooks.push(hook);
+}
+
+/** Job handlers: read-only lookups here; finance records are registered by financeXero.ts. */
 const HANDLERS: Record<string, Handler> = {
   /** Reads tax rates, accounts and items for the mapping pickers. Read-only. */
   async lookups() {
@@ -287,7 +300,7 @@ const HANDLERS: Record<string, Handler> = {
     ]);
     const o = org.json?.Organisations?.[0] ?? {};
     const taxRates = (taxes.json?.TaxRates ?? []).filter((t: any) => t.Status === 'ACTIVE').map((t: any) => ({ name: t.Name, taxType: t.TaxType, rate: t.EffectiveRate ?? null }));
-    const accountList = (accounts.json?.Accounts ?? []).map((a: any) => ({ code: a.Code ?? null, name: a.Name, type: a.Type, taxType: a.TaxType ?? null }));
+    const accountList = (accounts.json?.Accounts ?? []).map((a: any) => ({ id: a.AccountID, code: a.Code ?? null, name: a.Name, type: a.Type, class: a.Class ?? null, taxType: a.TaxType ?? null, payments: a.EnablePaymentsToAccount === true }));
     const itemList = (items.json?.Items ?? []).map((i: any) => ({ code: i.Code, name: i.Name ?? i.Code }));
     await LOOKUPS.set({
       organisation: { name: o.Name ?? null, class: o.Class ?? null, countryCode: o.CountryCode ?? null, baseCurrency: o.BaseCurrency ?? null, salesTaxBasis: o.SalesTaxBasis ?? null },
@@ -348,6 +361,7 @@ export async function runWorker(max = 25): Promise<{ processed: number; stopped?
         updatedAt: FieldValue.serverTimestamp(),
       });
       await LOG.add({ kind: 'sync', job: d.id, type: job.type, ok: false, detail: message, willRetry: retry, at: FieldValue.serverTimestamp() });
+      for (const hook of failureHooks) await hook({ id: d.id, type: job.type, recordId: job.recordId }, message, retry, err).catch(e => logger.error('Job failure hook failed', e));
       if (!retry) await notifyAdmins({ title: 'Xero sync failed', body: `${job.type} ${job.recordId}: ${message}`, link: '/admin/xero' });
       if (info?.rateLimited) return { processed, stopped: 'rate limited' };
       if (/not connected|not configured/i.test(message)) return { processed, stopped: message };
@@ -381,7 +395,15 @@ export const xeroSyncNow = onCall({ ...opts, timeoutSeconds: 300 }, async req =>
   const status = (await STATUS.get()).data();
   if (!status?.connected) fail('Connect Xero first.');
   await queueJob('lookups', status.tenantId, {}, { rerun: true });
-  const out = await runWorker();
+  // Works through the queue (25 at a time) for up to about 4 minutes, stopping on rate limits.
+  const startedAt = Date.now();
+  const out: { processed: number; stopped?: string } = { processed: 0 };
+  while (Date.now() - startedAt < 240_000) {
+    const run = await runWorker();
+    out.processed += run.processed;
+    if (run.stopped) { out.stopped = run.stopped; break; }
+    if (run.processed === 0) break;
+  }
   await audit('sync-now', `Processed ${out.processed}${out.stopped ? ` (stopped: ${out.stopped})` : ''}`, uid);
   return out;
 });
@@ -404,17 +426,13 @@ export const xeroRetry = onCall(opts, async req => {
   return { retried: count };
 });
 
-const INVOICE_STATUSES = ['DRAFT', 'AUTHORISED'];
-
-/** General settings. Record types stay off until each is built and approved. */
+/**
+ * Superseded by financeSaveSettings (the accounting settings). Kept so existing deployments keep the
+ * function name; invoices are always sent AUTHORISED (credit can only be applied to authorised invoices)
+ * and only refunds need approval.
+ */
 export const xeroSaveSettings = onCall(opts, async req => {
-  const uid = requireAdmin(req);
-  const d = req.data ?? {};
-  const startDate = d.startDate === null || d.startDate === '' ? null : String(d.startDate);
-  if (startDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) fail('Start date must be a date.', 'invalid-argument');
-  const invoiceStatus = INVOICE_STATUSES.includes(d.invoiceStatus) ? d.invoiceStatus : 'DRAFT';
-  const requireApproval = d.requireApproval !== false;
-  await SETTINGS.set({ startDate, invoiceStatus, requireApproval, updatedAt: FieldValue.serverTimestamp(), updatedBy: uid }, { merge: true });
-  await audit('settings', `Start ${startDate ?? 'not set'}, invoices ${invoiceStatus}, approval ${requireApproval ? 'required' : 'not required'}`, uid);
-  return { ok: true };
+  requireAdmin(req);
+  fail('These settings moved to Finance → Accounting settings.');
 });
+void SETTINGS;

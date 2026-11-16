@@ -1,9 +1,9 @@
 import { collection, doc, limit, orderBy, query } from 'firebase/firestore';
 import { ArrowLeftRight, CircleAlert, Link2, PlugZap, RefreshCw, RotateCcw, Unplug } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Badge, Button, Card, CardHeader, EmptyState, Input, Modal, PageHeader, Segmented, Stat } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, Stat } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { toDate, useDoc, useQuery } from '@/lib/data';
 import { db } from '@/lib/firebase';
@@ -25,12 +25,14 @@ interface XeroStatus {
 interface Job { id: string; type: string; recordId: string; status: string; attempts: number; lastError?: string | null; updatedAt?: Date }
 interface LogEntry { id: string; kind: 'sync' | 'audit'; job?: string; type?: string; action?: string; ok?: boolean; detail: string; willRetry?: boolean; at?: Date }
 
-/** Record types that will sync once the client confirms the accounting rules. */
+/** What the finance sync sends to Xero (all automatic except refunds). */
 const RECORD_TYPES = [
-  { key: 'contact', label: 'Customers (contacts)' },
-  { key: 'invoice', label: 'Invoices' },
-  { key: 'payment', label: 'Payments' },
-  { key: 'creditnote', label: 'Refunds (credit notes)' },
+  { key: 'contact', label: 'Customers (contacts)', when: 'Automatic' },
+  { key: 'invoice', label: 'Lesson, cancellation-fee and correction invoices', when: 'Automatic' },
+  { key: 'prepayment', label: 'Credit bought (prepayments)', when: 'Automatic' },
+  { key: 'allocation', label: 'Credit applied to invoices (allocations)', when: 'Automatic' },
+  { key: 'creditnote', label: 'Cancellations, reschedules, referral and goodwill credit (credit notes)', when: 'Automatic' },
+  { key: 'refund', label: 'Refunds paid', when: 'After admin approval' },
 ];
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -42,13 +44,13 @@ export function AdminXero() {
     ...d,
     connectedAt: toDate(d.connectedAt), refreshExpiresAt: toDate(d.refreshExpiresAt), lastSyncAt: toDate(d.lastSyncAt), lastCheckAt: toDate(d.lastCheckAt),
   }) as XeroStatus);
-  const { data: settings } = useDoc(doc(db, 'integrations', 'xeroSettings'), (_, d) => d as { startDate: string | null; invoiceStatus: 'DRAFT' | 'AUTHORISED'; requireApproval: boolean });
+  const { data: settings } = useDoc(doc(db, 'integrations', 'xeroSettings'), (_, d) => d as { enabled?: boolean });
   const { data: lookups } = useDoc(doc(db, 'integrations', 'xeroLookups'), (_, d) => ({ taxRates: (d.taxRates ?? []).length as number, accounts: (d.accounts ?? []).length as number, items: (d.items ?? []).length as number, updatedAt: toDate(d.updatedAt) }));
   const { data: jobs } = useQuery(query(collection(db, 'xeroSyncJobs'), limit(1000)),
     (id, d) => ({ id, type: d.type, recordId: d.recordId, status: d.status, attempts: d.attempts ?? 0, lastError: d.lastError, updatedAt: toDate(d.updatedAt) }) as Job, 'xero:jobs');
   const { data: log } = useQuery(query(collection(db, 'xeroSyncLog'), orderBy('at', 'desc'), limit(30)),
     (id, d) => ({ id, ...d, at: toDate(d.at) }) as LogEntry, 'xero:log');
-  const [config, setConfig] = useState<{ missing: string[]; scopes: string[]; redirectUri: string } | null>(null);
+  const [config, setConfig] = useState<{ missing: string[]; scopes: string[]; redirectUri: string; needsReconnect: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
@@ -112,6 +114,14 @@ export function AdminXero() {
         </div>
       )}
 
+      {connected && config?.needsReconnect && (
+        <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+          <CircleAlert className="size-4 shrink-0" />
+          <p className="flex-1"><strong>Reconnect to allow the finance sync.</strong> The connection was approved with read-only access; invoices, credit and refunds need write access to contacts, invoices, payments and bank transactions. A Xero admin approves this once on Xero’s page.</p>
+          <Button size="sm" icon={<PlugZap className="size-4" />} loading={busy === 'connect'} onClick={() => run('connect', async () => { const { url } = await api.xeroConnectUrl({}); window.location.assign(url); })}>Reconnect</Button>
+        </div>
+      )}
+
       <Card className="mb-6">
         <CardHeader title={<span className="flex items-center gap-2"><Link2 className="size-4" />Connection</span>}
           action={connected && <Button size="sm" variant="secondary" loading={busy === 'check'} onClick={() => run('check', () => api.xeroCheckConnection({}), 'Connection OK')}>Check connection</Button>} />
@@ -135,8 +145,8 @@ export function AdminXero() {
       </Card>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Invoices synced" value={count(j => j.type === 'invoice' && j.status === 'done')} icon={<ArrowLeftRight className="size-4" />} />
-        <Stat label="Payments synced" value={count(j => j.type === 'payment' && j.status === 'done')} icon={<ArrowLeftRight className="size-4" />} />
+        <Stat label="Finance records synced" value={count(j => j.type === 'fin' && j.status === 'done')} icon={<ArrowLeftRight className="size-4" />} sub={<Link to="/admin/finance?tab=transactions" className="underline">Transactions</Link>} />
+        <Stat label="Settings lists read" value={count(j => j.type === 'lookups' && j.status === 'done')} icon={<ArrowLeftRight className="size-4" />} />
         <Stat label="Pending" value={count(j => j.status === 'pending' || j.status === 'processing')} />
         <Stat label="Failed" value={failed.length}
           sub={failed.length > 0 && <button className="font-semibold underline" onClick={() => run('retry', () => api.xeroRetry({}), 'Failed items queued again')}>Retry failed</button>} />
@@ -144,11 +154,11 @@ export function AdminXero() {
 
       <div className="mb-6 grid grid-cols-1 gap-6 [&>*]:min-w-0 lg:grid-cols-2">
         <Card>
-          <CardHeader title="What syncs" subtitle="Each type is switched on once the accounting rules are agreed." />
+          <CardHeader title="What syncs" subtitle={settings?.enabled ? 'Finance records are on: everything below is sent automatically, one way.' : 'Off until finance is switched on under Finance → Accounting settings.'} />
           <ul className="divide-y divide-ink-100 dark:divide-ink-800">
             {RECORD_TYPES.map(t => (
               <li key={t.key} className="flex items-center justify-between px-5 py-3 text-sm">
-                <span>{t.label}</span><Badge tone="amber">Awaiting client decision</Badge>
+                <span>{t.label}</span><Badge tone={settings?.enabled ? (t.when === 'Automatic' ? 'green' : 'blue') : 'slate'}>{settings?.enabled ? t.when : 'Off'}</Badge>
               </li>
             ))}
             <li className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
@@ -157,7 +167,13 @@ export function AdminXero() {
             </li>
           </ul>
         </Card>
-        <SettingsCard initial={settings} />
+        <Card>
+          <CardHeader title="Accounting settings" subtitle="Accounts, tax types, seller model and start date." />
+          <div className="space-y-3 p-5 text-sm">
+            <p>Invoices are always sent to Xero as approved (authorised), because credit can only be applied to approved invoices. Only refunds wait for an admin.</p>
+            <Link to="/admin/finance?tab=settings" className="font-semibold underline">Open Finance → Accounting settings</Link>
+          </div>
+        </Card>
       </div>
 
       <Card>
@@ -195,45 +211,5 @@ export function AdminXero() {
         <p className="text-sm text-ink-600 dark:text-ink-300">Safe Learners’ access to Xero is revoked and the stored keys are deleted. Sync stops until an admin connects again. Nothing already in Xero is changed.</p>
       </Modal>
     </>
-  );
-}
-
-function SettingsCard({ initial }: { initial: { startDate: string | null; invoiceStatus: 'DRAFT' | 'AUTHORISED'; requireApproval: boolean } | null }) {
-  const [startDate, setStartDate] = useState('');
-  const [invoiceStatus, setInvoiceStatus] = useState<'DRAFT' | 'AUTHORISED'>('DRAFT');
-  const [requireApproval, setRequireApproval] = useState(true);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!initial) return;
-    setStartDate(initial.startDate ?? '');
-    setInvoiceStatus(initial.invoiceStatus ?? 'DRAFT');
-    setRequireApproval(initial.requireApproval !== false);
-  }, [initial]);
-  return (
-    <Card>
-      <CardHeader title="Settings" subtitle="Defaults are the safest options." />
-      <div className="space-y-4 p-5 text-sm">
-        <Input label="Start date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} hint="Nothing dated before this is ever sent to Xero." />
-        <div>
-          <p className="mb-1.5 font-semibold">New invoices in Xero</p>
-          <Segmented value={invoiceStatus} onChange={v => setInvoiceStatus(v as 'DRAFT' | 'AUTHORISED')} options={[{ value: 'DRAFT', label: 'Draft (checked in Xero)' }, { value: 'AUTHORISED', label: 'Approved' }]} className="[&_button]:text-center" />
-        </div>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" className="size-4 accent-brand-500" checked={requireApproval} onChange={e => setRequireApproval(e.target.checked)} />
-          An admin approves each record before it is sent
-        </label>
-        <Button loading={saving} onClick={async () => {
-          setSaving(true);
-          try {
-            await api.xeroSaveSettings({ startDate: startDate || null, invoiceStatus, requireApproval });
-            toast.success('Settings saved');
-          } catch (err) {
-            toast.error(errorMessage(err));
-          } finally {
-            setSaving(false);
-          }
-        }}>Save settings</Button>
-      </div>
-    </Card>
   );
 }

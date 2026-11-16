@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { fullName, pricingOf, type Role } from '@shared/domain';
+import { CREDIT_CATEGORIES, PAYMENT_METHODS, type CreditCategory, type PaymentMethod } from '@shared/finance';
 import { useAuth } from '@/auth/AuthProvider';
 import { BookingRow } from '@/components/booking';
 import { Avatar, Badge, Button, ButtonLink, Card, CardHeader, EmptyState, Input, Modal, PageHeader, PageLoader, Select, Stat, formatMoney } from '@/components/ui';
@@ -74,7 +75,11 @@ export function AdminUserDetail() {
   const [walletOpen, setWalletOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [category, setCategory] = useState<'' | CreditCategory>('');
+  const [method, setMethod] = useState<PaymentMethod>('bank_transfer');
+  const [payRef, setPayRef] = useState('');
   const [busy, setBusy] = useState(false);
+  const deducting = Number(amount) < 0;
 
   if (loading) return <PageLoader />;
   if (!user) return <Card><EmptyState title="User not found" action={<ButtonLink to="/admin/users">All users</ButtonLink>} /></Card>;
@@ -129,14 +134,20 @@ export function AdminUserDetail() {
         </div>
       </Card>
       <Modal open={walletOpen} onClose={() => setWalletOpen(false)} title={`Adjust ${user.firstName}’s wallet`}
-        footer={<Button loading={busy} disabled={!Number(amount)} onClick={async () => {
+        footer={<Button loading={busy} disabled={!Number(amount) || (!deducting && !category) || (category === 'payment_received' && !deducting && !payRef.trim())} onClick={async () => {
           setBusy(true);
           try {
-            const res = await api.adjustWallet({ uid: user.id, amount: Number(amount), note: note.trim() || undefined });
+            const res = await api.adjustWallet({
+              uid: user.id, amount: Number(amount), note: note.trim() || undefined,
+              category: deducting ? 'correction' : category || undefined,
+              ...(category === 'payment_received' && !deducting ? { paymentMethod: method, paymentReference: payRef.trim() } : {}),
+            });
             toast.success(`New balance ${formatMoney(res.balance)}`);
             setWalletOpen(false);
             setAmount('');
             setNote('');
+            setCategory('');
+            setPayRef('');
           } catch (err) {
             toast.error(errorMessage(err));
           } finally {
@@ -144,7 +155,21 @@ export function AdminUserDetail() {
           }
         }}>Apply</Button>}>
         <div className="grid gap-4">
-          <Input label="Amount (AUD)" type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} hint="Use a negative number to deduct." />
+          <Input label="Amount (AUD)" type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} hint="Use a negative number to deduct (recorded as an administrative correction)." />
+          {!deducting && (
+            <Select label="What is this credit?" value={category} onChange={e => setCategory(e.target.value as CreditCategory)} hint="Only a confirmed payment is recorded as money received.">
+              <option value="">Choose…</option>
+              {Object.entries(CREDIT_CATEGORIES).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+            </Select>
+          )}
+          {!deducting && category === 'payment_received' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select label="Paid by" value={method} onChange={e => setMethod(e.target.value as PaymentMethod)}>
+                {Object.entries(PAYMENT_METHODS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </Select>
+              <Input label="Payment reference" value={payRef} onChange={e => setPayRef(e.target.value)} placeholder="e.g. bank transfer reference" />
+            </div>
+          )}
           <Input label="Note shown to the learner" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. 10 hour package paid by bank transfer" />
         </div>
       </Modal>

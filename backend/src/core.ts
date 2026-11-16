@@ -142,7 +142,20 @@ export function walletEntry(
   userId: string,
   currentBalance: number,
   amount: number,
-  entry: { type: 'booking' | 'refund' | 'topup' | 'referral' | 'adjustment' | 'charge'; note: string; bookingId?: string },
+  entry: {
+    type: 'booking' | 'refund' | 'topup' | 'referral' | 'adjustment' | 'charge' | 'refund_payout';
+    note: string;
+    bookingId?: string;
+    /** Where the money came from or went (finance records read these). */
+    category?: string;
+    paymentMethod?: string;
+    paymentReference?: string;
+    addedBy?: string;
+    refundRequestId?: string;
+    referralOf?: string;
+    /** A later payment of a lesson's outstanding balance. */
+    balancePayment?: boolean;
+  },
 ): number {
   const balanceAfter = Math.round((currentBalance + amount) * 100) / 100;
   tx.update(db.doc(`users/${userId}`), { walletBalance: balanceAfter });

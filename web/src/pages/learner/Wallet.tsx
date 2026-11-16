@@ -1,12 +1,17 @@
 import { collection, limit, orderBy, query } from 'firebase/firestore';
-import { ArrowDownLeft, ArrowUpRight, CreditCard, Mail, Wallet as WalletIcon } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, CreditCard, Mail, Undo2, Wallet as WalletIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { CREDIT_HOURLY_RATE, CREDIT_PACKAGES, STATUS_META, creditPackagePrice, displayRef, type CreditPackageId } from '@shared/domain';
+import { refundableAmount } from '@shared/finance';
 import { formatDate } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { PaymentBadge, PaymentLines, lessonLabel } from '@/components/booking';
-import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, cx, formatMoney } from '@/components/ui';
+import { RefundStatusBadge } from '@/components/finance';
+import { Badge, Button, Card, CardHeader, EmptyState, Input, Modal, PageHeader, Select, Textarea, cx, formatMoney } from '@/components/ui';
+import { api, errorMessage } from '@/lib/api';
+import { useMyRefunds } from '@/lib/finance';
 import { mapTransaction, useBookings, useQuery } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { SUPPORT_EMAIL } from '../public/Layout';
@@ -80,7 +85,7 @@ export function Wallet() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-sm font-semibold">{t.note}</p>
-                      <p className="text-xs text-ink-500">{t.createdAt ? formatDate(t.createdAt) : ''}</p>
+                      <p className="text-xs text-ink-500">{[SOURCE_LABEL[t.type], t.createdAt ? formatDate(t.createdAt) : ''].filter(Boolean).join(' · ')}</p>
                     </div>
                     <span className={cx('text-sm font-bold', t.amount >= 0 && 'text-emerald-600')}>{t.amount >= 0 ? '+' : ''}{formatMoney(t.amount)}</span>
                   </li>
@@ -90,6 +95,7 @@ export function Wallet() {
           </Card>
 
           <LessonPayments learnerId={uid} />
+          <Refunds balance={me.walletBalance ?? 0} topups={transactions.filter(t => t.type === 'topup' && t.amount > 0)} />
         </div>
       </div>
 
@@ -102,6 +108,61 @@ export function Wallet() {
         </a>
       </Modal>
     </>
+  );
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  topup: 'Credit added', booking: 'Lesson payment', refund: 'Credit returned', referral: 'Referral reward',
+  adjustment: 'Correction', refund_payout: 'Refund', charge: 'Fee',
+};
+
+/** Ask for unused credit back (approved by an admin, paid by bank transfer), and past requests. */
+function Refunds({ balance, topups }: { balance: number; topups: { id: string; amount: number; note: string; createdAt?: Date }[] }) {
+  const { uid } = useAuth();
+  const { data: refunds } = useMyRefunds(uid);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [source, setSource] = useState('');
+  const [busy, setBusy] = useState(false);
+  const max = refundableAmount(balance, refunds.filter(r => r.status === 'awaiting_approval').map(r => r.amount));
+  return (
+    <Card>
+      <CardHeader title="Refunds" subtitle="Ask for unused credit back. An admin reviews every request; approved refunds are paid by bank transfer."
+        action={<Button size="sm" variant="secondary" icon={<Undo2 className="size-4" />} disabled={max <= 0} onClick={() => { setAmount(max.toFixed(2)); setOpen(true); }}>Request a refund</Button>} />
+      {refunds.length === 0 ? <EmptyState title="No refund requests" body={max > 0 ? `You can ask for up to ${formatMoney(max)}.` : 'Refunds are available when you have unused credit.'} /> : (
+        <ul className="divide-y divide-ink-100 dark:divide-ink-800">
+          {refunds.map(r => (
+            <li key={r.id} className="space-y-1 px-5 py-3 text-sm">
+              <div className="flex items-center justify-between gap-3"><span className="font-semibold">{r.number} · {formatMoney(r.amount)}</span><RefundStatusBadge status={r.status} /></div>
+              <p className="text-xs text-ink-500">Requested {r.requestedAt ? formatDate(r.requestedAt) : ''}{r.transferReference ? ` · paid, transfer ${r.transferReference}` : ''}</p>
+              {r.rejectionReason && <p className="text-xs text-red-700">Reason: {r.rejectionReason}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <Modal open={open} onClose={() => setOpen(false)} title="Request a refund"
+        footer={<Button loading={busy} disabled={!(Number(amount) > 0) || Number(amount) > max + 0.005 || reason.trim().length < 3} onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await api.requestRefund({ amount: Number(amount), reason: reason.trim(), ...(source ? { sourceTxId: `credit__${source}` } : {}) });
+            toast.success(`Refund request ${r.number} sent. We’ll let you know once it’s reviewed.`);
+            setOpen(false); setReason(''); setSource('');
+          } catch (err) { toast.error(errorMessage(err)); } finally { setBusy(false); }
+        }}>Send request</Button>}>
+        <div className="space-y-3">
+          <Input label="Amount (AUD)" type="number" step="0.01" min="0.01" max={max} value={amount} onChange={e => setAmount(e.target.value)} hint={`Up to ${formatMoney(max)} of unused credit.`} />
+          {topups.length > 0 && (
+            <Select label="Which payment is this about? (optional)" value={source} onChange={e => setSource(e.target.value)}>
+              <option value="">Any unused credit</option>
+              {topups.map(t => <option key={t.id} value={t.id}>{t.createdAt ? formatDate(t.createdAt) : ''} · {formatMoney(t.amount)} · {t.note}</option>)}
+            </Select>
+          )}
+          <Textarea label="Reason" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. I’ve finished my lessons and have credit left over." />
+          <p className="text-xs text-ink-500">Approved credit is taken out of your wallet straight away, then paid to you by bank transfer.</p>
+        </div>
+      </Modal>
+    </Card>
   );
 }
 
