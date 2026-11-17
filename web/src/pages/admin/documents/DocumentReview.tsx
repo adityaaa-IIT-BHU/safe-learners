@@ -185,8 +185,8 @@ function VersionReview({ record, v, review, versions }: { record: DocRecord; v: 
                       <tr key={k} className={cx(f?.band === 'low' && 'bg-red-50/60 dark:bg-red-500/5', f?.band === 'medium' && 'bg-amber-50/60 dark:bg-amber-500/5')}>
                         <td className="py-2 pr-3 font-medium">{fieldLabel(k)}</td>
                         <td className="py-2 pr-3">{editing
-                          ? <Input value={edits[k] ?? currentValue(f) ?? ''} onChange={e => setEdits(x => ({ ...x, [k]: e.target.value }))} placeholder={/Date$/.test(k) ? 'DD/MM/YYYY' : ''} />
-                          : <>{/Date$/.test(k) ? formatDocDate(currentValue(f)) : currentValue(f) ?? '—'}{f?.correctedValue !== undefined && f?.correctedValue !== null && <span className="block text-xs text-ink-400">OCR read: {f.value ?? '—'} · corrected by {f.correctedByName}</span>}</>}
+                          ? <Input value={edits[k] ?? currentValue(f) ?? ''} onChange={e => setEdits(x => ({ ...x, [k]: e.target.value }))} placeholder={/Date$|dateOfBirth/.test(k) ? 'DD/MM/YYYY' : ''} />
+                          : <>{/Date$|dateOfBirth/.test(k) ? formatDocDate(currentValue(f)) : currentValue(f) ?? '—'}{f?.correctedValue !== undefined && f?.correctedValue !== null && <span className="block text-xs text-ink-400">OCR read: {f.value ?? '—'} · corrected by {f.correctedByName}</span>}</>}
                         </td>
                         <td className="py-2 pr-3">{f ? <Badge tone={BAND[f.band]?.tone ?? 'slate'}>{BAND[f.band]?.label ?? f.band}{f.confidence !== null ? ` · ${Math.round(f.confidence * 100)}%` : ''}</Badge> : <span className="text-ink-400">Not found</span>}</td>
                         <td className="py-2 pr-3 text-xs text-ink-500">{f ? (f.method === 'label' ? 'Printed label' : f.method === 'pattern' ? 'Printed pattern' : 'Admin') : ''}</td>

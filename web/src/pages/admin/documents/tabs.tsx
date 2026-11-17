@@ -169,9 +169,12 @@ export function ComplianceTab({ users }: { users: UserProfile[] }) {
     const mine = docs.filter(d => d.instructorId === u.id);
     const c = computeCompliance(mine.map(d => ({ type: d.type, latestStatus: d.latestStatus, verifiedExpiry: d.verifiedExpiry, hasVerified: d.verifiedVersion != null })), settings.requirements);
     if (u.compliance?.enforced) c.eligible = u.compliance.eligible;
-    return { u, mine, c, stored: !!u.compliance?.enforced };
+    // Instructors whose documents are only in the earlier records can't be judged until they're imported.
+    const known = mine.length > 0 || !!u.compliance?.enforced;
+    return { u, mine, c, stored: !!u.compliance?.enforced, known };
   });
-  const needing = rows.filter(r => !r.c.eligible);
+  const needing = rows.filter(r => r.known && !r.c.eligible);
+  const notImported = rows.filter(r => !r.known).length;
   const focus = params.get('instructor');
   const shown = (focus ? rows.filter(r => r.u.id === focus) : onlyAction ? needing : rows).sort((a, b) => fullName(a.u).localeCompare(fullName(b.u)));
 
@@ -189,7 +192,7 @@ export function ComplianceTab({ users }: { users: UserProfile[] }) {
     { label: 'Failed OCR processing', value: count(r => r.latestStatus === 'processing_failed'), icon: <AlertTriangle className="size-5" /> },
     { label: 'Duplicate warnings', value: count(r => !!r.flags?.duplicates), icon: <Copy className="size-5" /> },
     { label: 'Possibly suspicious', value: count(r => !!r.flags?.risks), icon: <AlertTriangle className="size-5" /> },
-    { label: 'Incomplete mandatory documents', value: rows.filter(r => r.c.missing.length).length, icon: <Files className="size-5" /> },
+    { label: 'Incomplete mandatory documents', value: rows.filter(r => r.known && r.c.missing.length).length, icon: <Files className="size-5" /> },
     { label: 'Instructors needing compliance action', value: needing.length, icon: <ShieldAlert className="size-5" /> },
   ];
 
@@ -201,7 +204,7 @@ export function ComplianceTab({ users }: { users: UserProfile[] }) {
       <Card className="mb-4">
         <div className="flex flex-wrap items-center gap-3 border-b border-ink-100 p-4 dark:border-ink-800">
           <h3 className="font-bold">Instructor compliance</h3>
-          <span className="text-xs text-ink-500">Mandatory: {mandatory.map(t => t.label).join(', ') || 'none'} (change in Settings)</span>
+          <span className="text-xs text-ink-500">Mandatory: {mandatory.map(t => t.label).join(', ') || 'none'} (change in Settings){notImported ? ` · ${notImported} instructor${notImported === 1 ? '' : 's'} with earlier records not imported yet` : ''}</span>
           <span className="flex-1" />
           {focus ? <Button size="sm" variant="ghost" onClick={() => { const p = new URLSearchParams(params); p.delete('instructor'); setParams(p); }}>Show all</Button>
             : <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyAction} onChange={e => setOnlyAction(e.target.checked)} />Only instructors needing action</label>}
@@ -219,13 +222,14 @@ export function ComplianceTab({ users }: { users: UserProfile[] }) {
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs uppercase text-ink-400"><th className="px-4 py-3">Instructor</th><th className="px-4 py-3">Eligibility</th>{mandatory.map(t => <th key={t.key} className="px-4 py-3">{t.label}</th>)}<th className="px-4 py-3">Test account</th></tr></thead>
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                {shown.map(({ u, mine, c, stored }) => (
+                {shown.map(({ u, mine, c, stored, known }) => (
                   <tr key={u.id}>
                     <td className="px-4 py-3 font-semibold"><Link to={`/admin/verifications?tab=documents&instructor=${encodeURIComponent(fullName(u))}`} className="underline">{fullName(u)}</Link></td>
-                    <td className="px-4 py-3">{c.eligible ? <Badge tone="green">Meets rules</Badge> : <Badge tone="red">Action needed</Badge>}{!stored && <span className="block text-xs text-ink-400">{settings.features.eligibilityUpdates ? 'Not yet calculated' : 'Not enforced (updates paused)'}</span>}</td>
+                    <td className="px-4 py-3">{!known ? <Badge>Earlier records</Badge> : c.eligible ? <Badge tone="green">Meets rules</Badge> : <Badge tone="red">Action needed</Badge>}
+                      {!known ? <span className="block text-xs text-ink-400">Not imported yet</span> : !stored && <span className="block text-xs text-ink-400">{settings.features.eligibilityUpdates ? 'Not yet calculated' : 'Not enforced (updates paused)'}</span>}</td>
                     {mandatory.map(t => {
                       const d = mine.find(x => x.type === t.key);
-                      return <td key={t.key} className="px-4 py-3">{d ? <DocStatusBadge status={recordStatus(d)} /> : c.missing.includes(t.key) ? <Badge>Missing</Badge> : <Badge>Earlier record</Badge>}</td>;
+                      return <td key={t.key} className="px-4 py-3">{d ? <DocStatusBadge status={recordStatus(d)} /> : !known ? <span className="text-xs text-ink-400">Earlier record</span> : c.missing.includes(t.key) ? <Badge>Missing</Badge> : <Badge>Earlier record</Badge>}</td>;
                     })}
                     <td className="px-4 py-3"><input type="checkbox" checked={!!u.testAccount} onChange={async e => {
                       try { await api.setTestAccount({ uid: u.id, testAccount: e.target.checked }); toast.success(e.target.checked ? 'Marked as a test account' : 'No longer a test account'); } catch (err) { toast.error(errorMessage(err)); }

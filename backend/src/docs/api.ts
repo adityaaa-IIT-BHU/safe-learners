@@ -272,7 +272,7 @@ export const correctDocumentFields = onCall(opts, async req => {
   for (const [k, raw] of Object.entries(corrections)) {
     if (!allowed.has(k)) fail(`Unknown field: ${k}`, 'invalid-argument');
     let value = str(raw, 200);
-    if (/Date$/.test(k) && value) {
+    if (/Date$|dateOfBirth/.test(k) && value) {
       const iso = normaliseExpiry(value) ?? parseDate(value);
       if (!iso) fail('Dates must be like 30/06/2029.', 'invalid-argument');
       value = iso;
