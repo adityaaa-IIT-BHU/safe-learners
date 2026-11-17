@@ -1,3 +1,5 @@
+import { approveCoreDocuments } from './docs/api';
+import { actorFrom } from './docs/store';
 import { onCall } from 'firebase-functions/v2/https';
 import { DEFAULT_TIMEZONE, formatDate } from '../../shared/time';
 import {
@@ -224,7 +226,7 @@ export const submitVerification = onCall(opts, async req => {
   const priv = (await db.doc(`users/${uid}/private/profile`).get()).data() || {};
   // Documents uploaded on the previous website count too, unless replaced by a new upload.
   const docs: Record<string, any> = { ...legacyVerificationDocs(priv.legacy), ...(priv.verification || {}) };
-  const missing = VERIFICATION_STEPS.filter(s => !docs[s.key]?.url || !docs[s.key]?.expiry);
+  const missing = VERIFICATION_STEPS.filter(s => !(docs[s.key]?.url || docs[s.key]?.path) || !docs[s.key]?.expiry);
   if (missing.length) fail(`Please complete: ${missing.map(m => m.label).join(', ')}.`);
   const expired = VERIFICATION_STEPS.filter(s => isExpired(docs[s.key]?.expiry));
   if (expired.length) fail(`These documents have expired: ${expired.map(m => m.label).join(', ')}. Please update them.`);
@@ -243,7 +245,7 @@ export const submitVerification = onCall(opts, async req => {
   return { ok: true };
 });
 
-export const reviewVerification = onCall(opts, async req => {
+export const reviewVerification = onCall({ ...opts, timeoutSeconds: 120 }, async req => {
   requireAdmin(req);
   const uid = String(req.data?.uid || '');
   const approve = req.data?.approve === true;
@@ -266,6 +268,8 @@ export const reviewVerification = onCall(opts, async req => {
       : `Your documents could not be approved: ${reason || 'please check and resubmit.'}`,
     link: approve ? '/instructor' : '/instructor/verification',
   });
+  // The documents reviewed with the instructor become verified document versions (with history).
+  if (approve) await approveCoreDocuments(uid, actorFrom(req, 'admin'));
   return { ok: true };
 });
 

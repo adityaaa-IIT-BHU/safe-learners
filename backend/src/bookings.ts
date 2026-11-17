@@ -132,6 +132,8 @@ function assertBookableInstructor(instructor: UserProfile | null): asserts instr
   if (!instructor || instructor.role !== 'instructor') fail('Instructor not found.', 'not-found');
   if (instructor.accountStatus === 'disabled') fail('This instructor is not taking bookings.');
   if (instructor.verificationStatus !== 'verified') fail('This instructor has not completed verification yet.');
+  // Mandatory documents (set by the document eligibility service when enabled): no new bookings while one is missing or expired.
+  if (instructor.compliance?.enforced && instructor.compliance.eligible === false) fail('This instructor can’t take new bookings until their documents are updated.');
 }
 
 /** Slot must sit inside operating hours (learner bookings) and must not clash with held time. */

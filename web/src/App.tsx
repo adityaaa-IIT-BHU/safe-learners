@@ -59,6 +59,7 @@ const AdminBookings = page(() => import('@/pages/admin/Bookings'), 'AdminBooking
 const AdminTools = page(() => import('@/pages/admin/Tools'), 'AdminTools');
 const AdminXero = page(() => import('@/pages/admin/Xero'), 'AdminXero');
 const AdminFinance = page(() => import('@/pages/admin/Finance'), 'AdminFinance');
+const AdminSettings = page(() => import('@/pages/admin/Settings'), 'AdminSettings');
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { user, profile, isAdmin, loading } = useAuth();
@@ -143,6 +144,7 @@ export default function App() {
               <Route path="tools" element={<AdminTools />} />
               <Route path="xero" element={<AdminXero />} />
               <Route path="finance" element={<AdminFinance />} />
+              <Route path="settings" element={<AdminSettings />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

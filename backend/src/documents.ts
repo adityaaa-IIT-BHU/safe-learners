@@ -1,9 +1,12 @@
-import { applicationDefault } from 'firebase-admin/app';
-import { getStorage } from 'firebase-admin/storage';
+import { createHash } from 'node:crypto';
 import { onCall } from 'firebase-functions/v2/https';
+import { appliesTo, documentId, isActive } from '../../shared/documents';
 import { VERIFICATION_STEPS, fullName, isExpired, type VerificationStepKey } from '../../shared/domain';
 import { parseDocumentText } from '../../shared/ocr';
 import { FieldValue, db, fail, logger, notify, notifyAdmins, requireAdmin, requireAuth, requireUser, userFrom } from './core';
+import { applyDecision } from './docs/api';
+import { OcrError, ocrProvider } from './docs/ocrProvider';
+import { actorFrom, docBucket, docRef, getDocumentSettings, pagesUsedThisMonth, recordOcrUsage } from './docs/store';
 
 const opts = { region: 'australia-southeast1', cors: true };
 const KEYS = VERIFICATION_STEPS.map(s => s.key) as string[];
@@ -18,43 +21,57 @@ function labelOf(key: VerificationStepKey) {
 }
 
 /**
- * Reads a document photo with Cloud Vision and suggests its number, expiry and state.
- * Only the instructor's own files under licenses/{uid}/ can be scanned.
+ * Reads a document photo with OCR and suggests its number, expiry and state while the instructor is
+ * filling in the form. Only runs when OCR is enabled (and, in test mode, for test accounts); the
+ * result is cached by file hash so the background processing never reads the same file again.
  */
-export const scanDocument = onCall({ ...opts, timeoutSeconds: 60 }, async req => {
+export const scanDocument = onCall({ ...opts, timeoutSeconds: 60, memory: '512MiB' }, async req => {
   const uid = requireAuth(req);
   const key = keyArg(req.data?.key);
   const path = String(req.data?.path || '');
-  if (!path.startsWith(`licenses/${uid}/`) || path.includes('..')) fail('That file can’t be scanned.', 'permission-denied');
+  if (!(path.startsWith(`licenses/${uid}/`) || path.startsWith(`verification-documents/${uid}/`)) || path.includes('..')) fail('That file can’t be scanned.', 'permission-denied');
   if (/\.pdf$/i.test(path)) return { found: false, reason: 'pdf' };
 
-  const bucket = getStorage().bucket().name;
-  const { access_token } = await applicationDefault().getAccessToken();
-  const res = await fetch('https://vision.googleapis.com/v1/images:annotate', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      requests: [{ image: { source: { imageUri: `gs://${bucket}/${path}` } }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] }],
-    }),
-  });
-  if (!res.ok) {
-    logger.error('Vision request failed', { status: res.status, body: (await res.text()).slice(0, 500) });
-    return { found: false, reason: 'unavailable' };
+  const settings = await getDocumentSettings();
+  const user = userFrom(await db.doc(`users/${uid}`).get());
+  if (!isActive(settings, 'ocr') || !appliesTo(settings, user)) return { found: false, reason: 'paused' };
+  if (settings.monthlyPageLimit > 0 && (await pagesUsedThisMonth()) >= settings.monthlyPageLimit) return { found: false, reason: 'paused' };
+  const provider = ocrProvider();
+  if (!provider) return { found: false, reason: 'unavailable' };
+
+  const file = docBucket().file(path);
+  const [buf] = await file.download();
+  const sha256 = createHash('sha256').update(buf).digest('hex');
+  const cacheRef = db.doc(`ocrCache/${sha256}`);
+  let text = '';
+  const cached = await cacheRef.get();
+  if (cached.exists) {
+    text = String(cached.data()!.read?.text ?? '');
+    await recordOcrUsage(1, true);
+  } else {
+    try {
+      const [meta] = await file.getMetadata();
+      const read = await provider.read(buf, String(meta.contentType || 'image/jpeg'), { maxPages: 1 });
+      await cacheRef.set({ read, createdAt: FieldValue.serverTimestamp(), createdMs: Date.now() });
+      await recordOcrUsage(read.units, false);
+      text = read.text;
+    } catch (err) {
+      logger.warn('OCR suggestion unavailable', { code: err instanceof OcrError ? err.code : 'unknown' });
+      return { found: false, reason: 'unavailable' };
+    }
   }
-  const json = (await res.json()) as { responses?: { fullTextAnnotation?: { text?: string }; error?: { message: string } }[] };
-  const text = json.responses?.[0]?.fullTextAnnotation?.text ?? '';
   if (!text.trim()) return { found: false, reason: 'no-text' };
   const parsed = parseDocumentText(key, text);
   return { found: !!(parsed.number || parsed.expiry), ...parsed };
 });
 
-/** An instructor sends a new or renewed document to admins for review. */
+/** An instructor sends a new or renewed document to admins for review (original flow). */
 export const submitDocument = onCall(opts, async req => {
   const uid = requireAuth(req);
   const instructor = await requireUser(uid, 'instructor');
   const key = keyArg(req.data?.key);
   const doc = ((await db.doc(`users/${uid}/private/profile`).get()).data()?.verification ?? {})[key];
-  if (!doc?.url || !doc?.number || !doc?.expiry) fail('Please upload the document and enter its number and expiry.');
+  if (!(doc?.url || doc?.path) || !doc?.number || !doc?.expiry) fail('Please upload the document and enter its number and expiry.');
   if (isExpired(doc.expiry)) fail(`Your ${labelOf(key).toLowerCase()} has expired. Please upload the current one.`);
 
   await db.doc(`users/${uid}`).update({
@@ -73,7 +90,7 @@ export const submitDocument = onCall(opts, async req => {
   return { ok: true };
 });
 
-/** Admin approves or rejects a single document. */
+/** Admin approves or rejects a single document (routes to the document records when they exist). */
 export const reviewDocument = onCall(opts, async req => {
   requireAdmin(req);
   const uid = String(req.data?.uid || '');
@@ -82,6 +99,12 @@ export const reviewDocument = onCall(opts, async req => {
   const note = String(req.data?.note || '').slice(0, 500);
   const instructor = userFrom(await db.doc(`users/${uid}`).get());
   if (!instructor || instructor.role !== 'instructor') fail('Instructor not found.', 'not-found');
+
+  const parent = (await docRef(documentId(uid, key)).get()).data();
+  if (parent?.latestVersion) {
+    await applyDecision(documentId(uid, key), parent.latestVersion, approve ? 'approve' : 'reject', note, actorFrom(req, 'admin'));
+    return { ok: true };
+  }
 
   const reviews = { ...(instructor.documentReviews ?? {}) };
   reviews[key] = { status: approve ? 'approved' : 'rejected', ...(note ? { note } : {}) };

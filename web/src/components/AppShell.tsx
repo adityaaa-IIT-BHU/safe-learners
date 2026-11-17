@@ -79,6 +79,7 @@ const NAV: Record<Role, NavItem[]> = {
     { to: '/admin/finance', label: 'Finance', icon: Landmark },
     { to: '/admin/xero', label: 'Xero', icon: ArrowLeftRight },
     { to: '/admin/tools', label: 'Tools', icon: Wrench },
+    { to: '/admin/settings', label: 'Settings', icon: Settings },
   ],
 };
 

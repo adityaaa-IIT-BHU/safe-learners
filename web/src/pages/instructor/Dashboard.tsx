@@ -5,6 +5,7 @@ import { CLOSED_STATUSES, PLATFORM_FEE_RATE, hasAnyHours, isExpiredProposal, typ
 import { DEFAULT_TIMEZONE, dayKey, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { BookingRow, lessonLabel } from '@/components/booking';
+import { DocumentAlerts } from '@/components/DocumentAlerts';
 import { Button, ButtonLink, Card, CardHeader, EmptyState, Skeleton, Stat, Tabs, formatMoney } from '@/components/ui';
 import { useBookings } from '@/lib/data';
 import { greeting } from '@/lib/format';
@@ -72,6 +73,7 @@ export function InstructorDashboard() {
         </Card>
       )}
 
+      <DocumentAlerts uid={me.id} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Upcoming lessons" value={view.upcoming.length} icon={<CalendarClock className="size-4" />} sub={<Link to="/instructor/calendar" className="underline">Open calendar</Link>} />
         <Stat label="Earnings this month" value={formatMoney(view.monthEarnings)} icon={<ChartColumn className="size-4" />} sub={<Link to="/instructor/reports" className="underline">View reports</Link>} />

@@ -62,9 +62,15 @@ service cloud.firestore {
         && (resource.data.role == 'learner' || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['mobile']));
 
       // Verification documents and other private details.
+      // Document details (number, expiry, file) are written only by the server once uploaded, so an
+      // approved document can't be changed without a new review.
       match /private/{doc} {
         allow read: if isSelf(uid) || isAdmin();
-        allow write: if isAdmin() || (isSelf(uid) && doc != 'banking');
+        allow create: if isAdmin() || (isSelf(uid) && doc != 'banking'
+          && !request.resource.data.keys().hasAny(['verification', 'verificationHistory']));
+        allow update: if isAdmin() || (isSelf(uid) && doc != 'banking'
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory']));
+        allow delete: if isAdmin() || (isSelf(uid) && doc != 'banking' && doc != 'profile');
       }
 
       // Payout details: bank account can't be changed by the instructor once saved (security);
@@ -132,7 +138,9 @@ service cloud.firestore {
     // Xero integration: admins can read status, settings, mapping lists, jobs and logs. Tokens
     // (integrations/xero) and OAuth state values are never readable from the browser.
     match /integrations/{doc} {
-      allow read: if isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus'];
+      allow read: if (isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus'])
+        // Document settings hold no secrets; instructors need the mandatory-document list.
+        || (signedIn() && doc == 'documentSettings');
     }
     match /xeroSyncJobs/{id} {
       allow read: if isAdmin();
@@ -165,7 +173,32 @@ service cloud.firestore {
       allow read: if isAdmin();
     }
 
-    // Everything else (counters, legacy collections) is server-only.
+    // Instructor documents (written only by Cloud Functions). Instructors read their own records;
+    // review details (comparison, duplicates, risk indicators, notes) are for admins only.
+    match /instructorDocuments/{docId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+      match /versions/{v} {
+        allow read: if isAdmin() || (signedIn() && docId.split('__')[0] == request.auth.uid);
+        match /admin/{d} {
+          allow read: if isAdmin();
+        }
+      }
+    }
+    match /documentJobs/{id} {
+      allow read: if isAdmin();
+    }
+    // Append-only: nobody, admins included, can edit or delete document audit records.
+    match /documentAudit/{id} {
+      allow read: if isAdmin();
+    }
+    match /documentNotifications/{id} {
+      allow read: if isAdmin();
+    }
+    match /ocrUsage/{id} {
+      allow read: if isAdmin();
+    }
+
+    // Everything else (counters, legacy collections, OCR cache, duplicate indexes) is server-only.
     match /{document=**} {
       allow read, write: if false;
     }

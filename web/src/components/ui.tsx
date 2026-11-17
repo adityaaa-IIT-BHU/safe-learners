@@ -261,7 +261,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
   title: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -278,7 +278,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
       className={clsx(
         'm-auto w-[calc(100%-2rem)] rounded-2xl bg-white p-0 text-ink-900 shadow-lift backdrop:bg-ink-950/50 backdrop:backdrop-blur-sm dark:bg-ink-900 dark:text-ink-100',
         'open:animate-slide-up',
-        { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' }[size],
+        { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-5xl' }[size],
       )}
     >
       {open && (

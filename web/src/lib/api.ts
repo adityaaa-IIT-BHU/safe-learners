@@ -150,4 +150,22 @@ export const api = {
   submitDocument: callable<{ key: VerificationStepKey }, { ok: true }>('submitDocument'),
   reviewDocument: callable<{ uid: string; key: VerificationStepKey; approve: boolean; note?: string }, { ok: true }>('reviewDocument'),
   setReviewHidden: callable<{ reviewId: string; hidden: boolean }, { ratingAvg: number; ratingCount: number }>('setReviewHidden'),
+
+  // Instructor documents
+  uploadDocumentVersion: callable<
+    { type: string; files: { path: string; name: string; contentType: string; side?: string }[]; number?: string; expiry?: string; state?: string; issueDate?: string },
+    { docId: string; version: number }
+  >('uploadDocumentVersion'),
+  getDocumentFile: callable<{ docId: string; version: number; index?: number }, { name: string; contentType: string; data: string }>('getDocumentFile'),
+  decideDocument: callable<{ docId: string; version: number; action: string; reason?: string }, { status: string }>('decideDocument'),
+  correctDocumentFields: callable<{ docId: string; version: number; corrections: Record<string, string>; note?: string }, { ok: true }>('correctDocumentFields'),
+  changeDocumentCategory: callable<{ docId: string; version: number; newType: string; reason?: string }, { docId: string; version: number }>('changeDocumentCategory'),
+  addDocumentNote: callable<{ docId: string; version: number; text: string }, { ok: true }>('addDocumentNote'),
+  recordOfficialCheck: callable<{ docId: string; version: number; result: string; reference?: string; note?: string }, { ok: true }>('recordOfficialCheck'),
+  retryDocumentProcessing: callable<{ docId: string; version: number; fresh?: boolean }, { outcome: string; message: string }>('retryDocumentProcessing'),
+  saveDocumentSettings: callable<{ settings: Record<string, unknown>; reason?: string }, { ok: true; changes: number }>('saveDocumentSettings'),
+  setTestAccount: callable<{ uid: string; testAccount: boolean }, { ok: true }>('setTestAccount'),
+  importLegacyDocuments: callable<{ uid?: string }, { created: number; skipped: number }>('importLegacyDocuments'),
+  runDocumentExpiryNow: callable<{ asOf?: string }, { skipped?: string; checked: number; generated: number; emailed: number; statusChanges: number; eligibilityChecked: number }>('runDocumentExpiryNow'),
+  documentUsage: callable<Record<string, never>, { pages: number; estimatedUsd: number; queued: number; waiting: number; failed: number }>('documentUsage'),
 };

@@ -1,31 +1,42 @@
 import { doc } from 'firebase/firestore';
 import { BadgeCheck, ExternalLink, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { VERIFICATION_STEPS, fullName, isExpired, legacyVerificationDocs, normaliseExpiry, type UserProfile, type VerificationDocument, type VerificationStepKey } from '@shared/domain';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, Tabs, Textarea } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useDoc } from '@/lib/data';
 import { db } from '@/lib/firebase';
+import { DocStatusBadge, recordStatus, useAllDocuments, type DocRecord } from '@/lib/documents';
+import { AutomationStrip, ComplianceTab, DocumentsTab } from './documents/tabs';
 import { useAllUsers } from './Overview';
 
-type Tab = 'pending_review' | 'updates' | 'not_submitted' | 'verified' | 'rejected';
+type InstructorTab = 'pending_review' | 'updates' | 'not_submitted' | 'verified' | 'rejected';
+type Tab = 'documents' | 'compliance' | InstructorTab;
 
 export function AdminVerifications() {
   const { data: users } = useAllUsers();
-  const [tab, setTab] = useState<Tab>('pending_review');
+  const { data: records } = useAllDocuments();
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') as Tab) || 'documents';
+  const setTab = (t: Tab) => setParams({ tab: t });
   const instructors = users.filter(u => u.role === 'instructor');
   // "Document updates": verified instructors who sent a renewed document.
-  const matches = (u: UserProfile, t: Tab) => t === 'updates'
+  const matches = (u: UserProfile, t: InstructorTab) => t === 'updates'
     ? u.verificationStatus === 'verified' && u.documentsPending === true
     : (u.verificationStatus ?? 'not_submitted') === t;
-  const list = instructors.filter(u => matches(u, tab));
-  const count = (t: Tab) => instructors.filter(u => matches(u, t)).length;
+  const list = tab === 'documents' || tab === 'compliance' ? [] : instructors.filter(u => matches(u, tab));
+  const count = (t: InstructorTab) => instructors.filter(u => matches(u, t)).length;
+  const queue = records.filter(r => ['pending_verification', 'manual_verification', 'processing_failed'].includes(r.latestStatus)).length;
 
   return (
     <>
       <PageHeader title="Instructor verification" />
+      <AutomationStrip />
       <Tabs value={tab} onChange={setTab} tabs={[
+        { value: 'documents', label: 'Documents', count: queue },
+        { value: 'compliance', label: 'Compliance' },
         { value: 'pending_review', label: 'Awaiting review', count: count('pending_review') },
         { value: 'updates', label: 'Document updates', count: count('updates') },
         { value: 'not_submitted', label: 'Not submitted', count: count('not_submitted') },
@@ -33,13 +44,16 @@ export function AdminVerifications() {
         { value: 'verified', label: 'Verified', count: count('verified') },
       ]} />
       <div className="mt-4 space-y-4">
-        {list.length === 0 ? <Card><EmptyState icon={<ShieldCheck className="size-6" />} title="Nothing here" /></Card> : list.map(u => <InstructorReview key={u.id} instructor={u} />)}
+        {tab === 'documents' ? <DocumentsTab />
+          : tab === 'compliance' ? <ComplianceTab users={users} />
+          : list.length === 0 ? <Card><EmptyState icon={<ShieldCheck className="size-6" />} title="Nothing here" /></Card>
+          : list.map(u => <InstructorReview key={u.id} instructor={u} records={records.filter(r => r.instructorId === u.id)} />)}
       </div>
     </>
   );
 }
 
-function InstructorReview({ instructor }: { instructor: UserProfile }) {
+function InstructorReview({ instructor, records }: { instructor: UserProfile; records: DocRecord[] }) {
   const { data: priv } = useDoc(doc(db, 'users', instructor.id, 'private', 'profile'), (_, d) => d as Record<string, any>);
   const docs = (priv?.verification ?? {}) as Record<string, VerificationDocument>;
   const legacy = legacyVerificationDocs(priv?.legacy);
@@ -78,6 +92,16 @@ function InstructorReview({ instructor }: { instructor: UserProfile }) {
           const d = docFor(s.key);
           const expired = isExpired(d?.expiry);
           const shown = normaliseExpiry(d?.expiry);
+          const rec = records.find(r => r.type === s.key);
+          if (rec) {
+            return (
+              <div key={s.key} className="rounded-xl border border-ink-200 p-3 text-sm dark:border-ink-700">
+                <p className="flex items-center justify-between gap-2 font-semibold">{s.label}<DocStatusBadge status={recordStatus(rec)} /></p>
+                <p className="mt-1 text-ink-500">Version {rec.latestVersion}{rec.verifiedExpiry ? ` · verified expiry ${rec.verifiedExpiry.split('-').reverse().join('/')}` : d?.expiry ? ` · typed expiry ${normaliseExpiry(d.expiry)?.split('-').reverse().join('/') ?? d.expiry}` : ''}</p>
+                <Link to={`/admin/verifications?tab=documents&doc=${rec.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Open document review</Link>
+              </div>
+            );
+          }
           return (
             <div key={s.key} className={`rounded-xl border p-3 text-sm ${instructor.documentReviews?.[s.key]?.status === 'pending' ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-500/5' : 'border-ink-200 dark:border-ink-700'}`}>
               <p className="flex items-center justify-between gap-2 font-semibold">{s.label}<ReviewBadge status={instructor.documentReviews?.[s.key]?.status} /></p>

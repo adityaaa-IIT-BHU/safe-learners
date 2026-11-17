@@ -1,88 +1,95 @@
-import { doc, setDoc } from 'firebase/firestore';
-import { BadgeCheck, CheckCircle2, Clock, ExternalLink, FileUp, History, Loader2, ScanText, ShieldAlert, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { AlertTriangle, BadgeCheck, CheckCircle2, Clock, FileUp, History, Loader2, ScanText, ShieldAlert, Upload } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  VERIFICATION_STEPS,
-  isExpired,
-  legacyVerificationDocs,
-  normaliseExpiry,
-  type DocumentReview,
-  type VerificationDocument,
-  type VerificationStepKey,
-} from '@shared/domain';
+  DOC_TYPES,
+  LEGACY_DOC_TYPES,
+  daysUntil,
+  describeDaysLeft,
+  docTypeLabel,
+  formatDocDate,
+  type DocStatus,
+  type DocTypeInfo,
+  type DocTypeKey,
+} from '@shared/documents';
+import { isExpired, legacyVerificationDocs, normaliseExpiry, type DocumentReview, type VerificationDocument } from '@shared/domain';
 import { dayKey } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
-import { Badge, Button, ButtonLink, Card, CardHeader, Input, Modal, PageHeader, Select, cx } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, CardHeader, Input, PageHeader, Select, cx } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
-import { toDate, useDoc } from '@/lib/data';
+import { useDoc, usePrivateProfile } from '@/lib/data';
 import { db } from '@/lib/firebase';
-import { uploadFile } from '@/lib/upload';
-
-type Docs = Partial<Record<VerificationStepKey, VerificationDocument>>;
-interface HistoryEntry extends VerificationDocument { key: VerificationStepKey; replacedAt?: Date; status?: DocumentReview['status'] }
+import { doc } from 'firebase/firestore';
+import { DocStatusBadge, DocumentViewer, FileButton, recordStatus, useDocumentSettings, useInstructorDocuments, useVersions, type DocRecord } from '@/lib/documents';
+import { uploadPrivateDocument } from '@/lib/upload';
 
 const STATES = ['NSW', 'ACT', 'VIC', 'QLD', 'SA', 'WA', 'TAS', 'NT'];
-const NEEDS_STATE: VerificationStepKey[] = ['driverLicence', 'instructorLicence', 'wwc'];
-const HAS_BACK: VerificationStepKey[] = ['driverLicence'];
-
-const formatExpiry = (v?: string) => {
-  const iso = normaliseExpiry(v);
-  return iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : v ?? '—';
-};
-
+const ACCEPT = 'image/jpeg,image/png,application/pdf';
 
 export function Verification() {
   const me = useProfile();
   const { readOnly } = useAuth();
-  const { data: priv } = useDoc(doc(db, 'users', me.id, 'private', 'profile'), (_, d) => {
-    const v = (d.verification ?? {}) as Record<string, Record<string, unknown>>;
-    return {
-      docs: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, { ...x, submittedAt: toDate(x.submittedAt) }])) as Docs,
-      history: ((d.verificationHistory ?? []) as Record<string, unknown>[]).map(h => ({ ...h, submittedAt: toDate(h.submittedAt), replacedAt: toDate(h.replacedAt) })) as HistoryEntry[],
-      // Documents uploaded on the previous website.
-      legacy: legacyVerificationDocs(d.legacy as Record<string, unknown> | undefined),
-    };
-  });
-  const docs = priv?.docs ?? {};
-  const legacy = priv?.legacy ?? {};
+  const { data: priv } = usePrivateProfile(me.id);
+  const { data: records } = useInstructorDocuments(me.id);
+  const settings = useDocumentSettings();
+  const [params] = useSearchParams();
+  const focus = params.get('doc');
+  const legacy = { ...legacyVerificationDocs(priv?.legacy), ...((priv?.verification ?? {}) as Record<string, VerificationDocument>) } as Partial<Record<DocTypeKey, VerificationDocument>>;
   const status = me.verificationStatus ?? 'not_submitted';
-  const current = (key: VerificationStepKey) => docs[key] ?? legacy[key];
-  const complete = VERIFICATION_STEPS.filter(s => current(s.key)?.url && current(s.key)?.expiry && !isExpired(current(s.key)?.expiry)).length;
+  const recordOf = (t: DocTypeKey) => records.find(r => r.type === t);
+  const core = DOC_TYPES.filter(t => LEGACY_DOC_TYPES.includes(t.key) || settings.requirements[t.key] === 'mandatory');
+  const extra = DOC_TYPES.filter(t => !core.includes(t));
+  const has = (t: DocTypeKey) => {
+    const d = legacy[t];
+    return !!(recordOf(t) || ((d?.url || d?.path) && d?.expiry && !isExpired(d.expiry)));
+  };
+  const complete = core.filter(t => has(t.key)).length;
   const [submitting, setSubmitting] = useState(false);
+  const { data: detail } = useDoc(doc(db, 'users', me.id, 'private', 'compliance'), (_, d) => d as { missing?: DocTypeKey[]; pending?: DocTypeKey[]; rejected?: DocTypeKey[]; expired?: DocTypeKey[] });
+  const compliance = me.compliance ? { ...me.compliance, missing: detail?.missing ?? [], pending: detail?.pending ?? [], rejected: detail?.rejected ?? [], expired: detail?.expired ?? [] } : undefined;
 
   return (
     <>
       <PageHeader title="Documents & verification" subtitle="We check every instructor before they can take bookings. Your documents are private — only Safe Learners admins can see them." />
       <StatusPanel status={status} reason={me.verificationRejectionReason} />
+      {compliance?.enforced && !compliance.eligible && status === 'verified' && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl bg-red-50 p-4 text-sm text-red-900 dark:bg-red-500/10 dark:text-red-200">
+          <ShieldAlert className="mt-0.5 size-5 shrink-0" />
+          <p><strong>New bookings are paused.</strong> {[
+            compliance.expired.length ? `Expired: ${compliance.expired.map(docTypeLabel).join(', ')}.` : '',
+            compliance.missing.length ? `Missing: ${compliance.missing.map(docTypeLabel).join(', ')}.` : '',
+            compliance.rejected.length ? `Needs a new upload: ${compliance.rejected.map(docTypeLabel).join(', ')}.` : '',
+            compliance.pending.length ? `Waiting for review: ${compliance.pending.map(docTypeLabel).join(', ')}.` : '',
+          ].filter(Boolean).join(' ')} Existing lessons are not affected.</p>
+        </div>
+      )}
 
       <div className="mb-6 flex items-center gap-3">
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
-          <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${(complete / VERIFICATION_STEPS.length) * 100}%` }} />
+          <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${(complete / Math.max(1, core.length)) * 100}%` }} />
         </div>
-        <span className="text-sm font-semibold">{complete}/{VERIFICATION_STEPS.length} current documents</span>
+        <span className="text-sm font-semibold">{complete}/{core.length} required documents</span>
       </div>
 
       <div className="grid grid-cols-1 gap-4 [&>*]:min-w-0 lg:grid-cols-2">
-        {VERIFICATION_STEPS.map(step => (
-          <DocumentCard
-            key={step.key}
-            uid={me.id}
-            step={step}
-            value={current(step.key)}
-            isLegacy={!docs[step.key] && !!legacy[step.key]}
-            review={me.documentReviews?.[step.key]}
-            verified={status === 'verified'}
-            allDocs={docs}
-            history={(priv?.history ?? []).filter(h => h.key === step.key)}
-            readOnly={readOnly}
-          />
+        {core.map(t => (
+          <DocumentCard key={t.key} uid={me.id} info={t} record={recordOf(t.key)} legacy={legacy[t.key]} review={me.documentReviews?.[t.key as keyof typeof me.documentReviews]}
+            verified={status === 'verified'} readOnly={readOnly} mandatory={settings.requirements[t.key] === 'mandatory'} focus={focus === t.key} />
+        ))}
+      </div>
+
+      <h2 className="mb-3 mt-8 text-lg font-bold">Additional documents</h2>
+      <p className="mb-4 text-sm text-ink-500">Optional unless the Safe Learners team asks for them.</p>
+      <div className="grid grid-cols-1 gap-4 [&>*]:min-w-0 lg:grid-cols-2">
+        {extra.map(t => (
+          <DocumentCard key={t.key} uid={me.id} info={t} record={recordOf(t.key)} verified={status === 'verified'} readOnly={readOnly} mandatory={false} focus={focus === t.key} />
         ))}
       </div>
 
       {(status === 'not_submitted' || status === 'rejected') && (
         <div className="mt-6 flex justify-end">
-          <Button size="lg" icon={<BadgeCheck className="size-5" />} disabled={complete < VERIFICATION_STEPS.length || readOnly} loading={submitting} onClick={async () => {
+          <Button size="lg" icon={<BadgeCheck className="size-5" />} disabled={complete < core.length || readOnly} loading={submitting} onClick={async () => {
             setSubmitting(true);
             try {
               await api.submitVerification({});
@@ -118,34 +125,27 @@ function StatusPanel({ status, reason }: { status: string; reason?: string }) {
   return null;
 }
 
-function statusBadge(value: VerificationDocument | undefined, review: DocumentReview | undefined, isLegacy: boolean, verified: boolean) {
-  if (!value?.url) return <Badge>Not provided</Badge>;
+function legacyBadge(value: VerificationDocument | undefined, review: DocumentReview | undefined, verified: boolean) {
+  if (!value?.url && !value?.path) return <Badge>Not provided</Badge>;
   if (isExpired(value.expiry)) return <Badge tone="red">Expired</Badge>;
   if (review?.status === 'pending') return <Badge tone="amber">Under review</Badge>;
   if (review?.status === 'rejected') return <Badge tone="red">Needs changes</Badge>;
-  if (review?.status === 'approved' || (isLegacy && verified)) return <Badge tone="green"><CheckCircle2 className="size-3" />Approved</Badge>;
+  if (review?.status === 'approved' || verified) return <Badge tone="green"><CheckCircle2 className="size-3" />Approved</Badge>;
   return <Badge tone="blue">Saved</Badge>;
 }
 
-function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, history, readOnly }: {
-  uid: string;
-  step: (typeof VERIFICATION_STEPS)[number];
-  value?: VerificationDocument;
-  isLegacy: boolean;
-  review?: DocumentReview;
-  verified: boolean;
-  allDocs: Docs;
-  history: HistoryEntry[];
-  readOnly: boolean;
+interface Picked { path: string; name: string; contentType: string }
+
+function DocumentCard({ uid, info, record, legacy, review, verified, readOnly, mandatory, focus }: {
+  uid: string; info: DocTypeInfo; record?: DocRecord; legacy?: VerificationDocument; review?: DocumentReview; verified: boolean; readOnly: boolean; mandatory: boolean; focus: boolean;
 }) {
-  // Until the instructor opens or closes the form, show it only when there's no document yet
-  // (documents load a moment after the page, so this can't be fixed at first render).
+  const hasAny = !!record || !!(legacy?.url || legacy?.path);
   const [editingChoice, setEditing] = useState<boolean | null>(null);
-  const editing = editingChoice ?? !value?.url;
+  const editing = editingChoice ?? (!hasAny && mandatory);
   const [showHistory, setShowHistory] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [front, setFront] = useState<{ url: string; path: string; name: string } | null>(null);
-  const [back, setBack] = useState<{ url: string; path: string; name: string } | null>(null);
+  const [viewer, setViewer] = useState<{ version?: number; index?: number; url?: string } | null>(null);
+  const [front, setFront] = useState<Picked | null>(null);
+  const [back, setBack] = useState<Picked | null>(null);
   const [number, setNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [state, setState] = useState('NSW');
@@ -155,17 +155,24 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
   const [saving, setSaving] = useState(false);
   const frontInput = useRef<HTMLInputElement>(null);
   const backInput = useRef<HTMLInputElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  const { data: versions } = useVersions(record?.id ?? null);
+  const latest = versions[0];
+  const current = record?.verifiedVersion ? versions.find(v => v.n === record.verifiedVersion) : undefined;
+
+  useEffect(() => { if (focus) card.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [focus]);
 
   const pick = async (side: 'front' | 'back', file: File | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') return toast.error('Please choose a photo or a PDF.');
+    if (!['image/jpeg', 'image/png', 'application/pdf'].includes(file.type)) return toast.error('Please choose a JPG, PNG or PDF file.');
+    if (file.size > 10 * 1024 * 1024) return toast.error('The file is larger than 10 MB.');
     setUploading(side);
     try {
-      const ext = file.type === 'application/pdf' ? 'pdf' : 'jpg';
-      const path = `licenses/${uid}/${step.key}-${side}-${Date.now()}.${ext}`;
-      const url = await uploadFile(path, file);
-      (side === 'front' ? setFront : setBack)({ url, path, name: file.name });
-      if (side === 'front') void scan(path);
+      const ext = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/png' ? 'png' : 'jpg';
+      const path = `verification-documents/${uid}/${info.key}/${Date.now()}-${side}.${ext}`;
+      await uploadPrivateDocument(path, file);
+      (side === 'front' ? setFront : setBack)({ path, name: file.name, contentType: file.type });
+      if (side === 'front' && LEGACY_DOC_TYPES.includes(info.key)) void scan(path);
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -173,54 +180,44 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
     }
   };
 
-  // Reads the photo and pre-fills anything the instructor hasn't typed yet.
+  // Suggests details from the photo (only when OCR is switched on); the instructor confirms them.
   const scan = async (path: string) => {
     setScanning(true);
     setScanNote(null);
     try {
-      const res = await api.scanDocument({ key: step.key, path });
+      const res = await api.scanDocument({ key: info.key as never, path });
       if (res.found) {
         if (res.number) setNumber(n => n || res.number!);
         if (res.expiry) setExpiry(e => e || res.expiry!);
-        if (res.state && NEEDS_STATE.includes(step.key)) setState(res.state);
+        if (res.state && info.needsState) setState(res.state);
         setScanNote('We read these details from your photo — please check they’re correct.');
-      } else {
-        setScanNote(res.reason === 'pdf' ? 'PDFs can’t be read automatically — please enter the details.' : 'We couldn’t read the details automatically — please enter them.');
+      } else if (res.reason !== 'paused') {
+        setScanNote(res.reason === 'pdf' ? 'Please enter the details from your PDF.' : 'We couldn’t read the details automatically — please enter them.');
       }
     } catch {
-      setScanNote('We couldn’t read the details automatically — please enter them.');
+      setScanNote(null);
     } finally {
       setScanning(false);
     }
   };
 
   const save = async () => {
-    if (!front && !value?.url) return toast.error('Please upload a photo or PDF of the document.');
-    if (!number.trim()) return toast.error('Please enter the document number.');
-    const iso = normaliseExpiry(expiry);
-    if (!iso) return toast.error('Please enter the expiry date with a 4-digit year, e.g. 30/06/2029.');
-    if (isExpired(iso)) return toast.error(`The expiry date (${iso.split('-').reverse().join('/')}) is in the past. Please check it, or renew the document first.`);
+    if (!front) return toast.error('Please upload a photo or PDF of the document.');
+    if (info.key !== 'other' && !number.trim()) return toast.error('Please enter the document number.');
+    const iso = expiry ? normaliseExpiry(expiry) : null;
+    if (info.expiryRequired && !iso) return toast.error('Please enter the expiry date with a 4-digit year, e.g. 30/06/2029.');
+    if (iso && isExpired(iso)) return toast.error('The expiry date is in the past. Please check it, or renew the document first.');
     setSaving(true);
     try {
-      const next: VerificationDocument = {
-        url: front?.url ?? value!.url,
-        ...(back?.url ?? value?.backUrl ? { backUrl: back?.url ?? value?.backUrl } : {}),
-        number: number.trim(),
-        expiry: iso,
-        ...(NEEDS_STATE.includes(step.key) ? { state } : {}),
-        submittedAt: new Date(),
-      };
-      const previous = allDocs[step.key];
-      await setDoc(doc(db, 'users', uid, 'private', 'profile'), {
-        verification: { ...allDocs, [step.key]: next },
-        ...(previous ? { verificationHistory: [...history.map(({ key, ...h }) => ({ key, ...h })), { key: step.key, ...previous, replacedAt: new Date(), ...(review?.status ? { status: review.status } : {}) }] } : {}),
-      }, { merge: true });
-      await api.submitDocument({ key: step.key });
-      toast.success(verified ? `${step.label} sent for review. You stay bookable meanwhile.` : `${step.label} saved`);
-      setEditing(false);
-      setFront(null);
-      setBack(null);
-      setScanNote(null);
+      await api.uploadDocumentVersion({
+        type: info.key,
+        files: [{ ...front, side: 'front' }, ...(back ? [{ ...back, side: 'back' }] : [])],
+        number: number.trim() || undefined,
+        expiry: iso ?? undefined,
+        state: info.needsState ? state : undefined,
+      });
+      toast.success(verified ? `${info.label} sent for review. You stay bookable meanwhile.` : `${info.label} saved`);
+      setEditing(false); setFront(null); setBack(null); setScanNote(null);
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -228,96 +225,97 @@ function DocumentCard({ uid, step, value, isLegacy, review, verified, allDocs, h
     }
   };
 
-  const startEditing = () => {
-    setNumber('');
-    setExpiry('');
-    setState(value?.state ?? 'NSW');
-    setEditing(true);
-  };
+  const startEditing = () => { setNumber(''); setExpiry(''); setState(legacy?.state ?? 'NSW'); setEditing(true); };
+
+  const status: DocStatus | null = record ? recordStatus(record) : null;
+  const shownNumber = record ? (current?.approved?.number ?? latest?.entered?.number) : legacy?.number;
+  const shownExpiry = record ? (record.verifiedExpiry ?? latest?.entered?.expiry ?? null) : normaliseExpiry(legacy?.expiry);
+  const left = shownExpiry ? daysUntil(shownExpiry) : null;
+  const needsAction = latest && ['needs_correction', 'reupload_required', 'rejected'].includes(latest.status) && latest.n === record?.latestVersion;
 
   return (
     <Card>
-      <CardHeader
-        title={<span className="flex items-center gap-2"><FileUp className="size-5 text-ink-400" />{step.label}</span>}
-        subtitle={step.hint}
-        action={statusBadge(value, review, isLegacy, verified)}
-      />
-      <div className="space-y-4 p-5">
-        {value?.url && (
-          <dl className="grid grid-cols-2 gap-3 rounded-xl bg-ink-50 p-4 text-sm dark:bg-ink-800/60">
-            <div><dt className="text-xs font-semibold uppercase text-ink-400">Number</dt><dd className="font-semibold">{value.number || '—'}</dd></div>
-            <div><dt className="text-xs font-semibold uppercase text-ink-400">Expires</dt><dd className={cx('font-semibold', isExpired(value.expiry) && 'text-red-600')}>{formatExpiry(value.expiry)}</dd></div>
-            <div className="col-span-2 flex flex-wrap gap-3">
-              <button onClick={() => setPreview(value.url!)} className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />{HAS_BACK.includes(step.key) ? 'Front' : 'View document'}</button>
-              {value.backUrl && <button onClick={() => setPreview(value.backUrl!)} className="inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Back</button>}
-              {isLegacy && <span className="text-xs text-ink-500">Uploaded on the previous website</span>}
-            </div>
-            {review?.status === 'rejected' && review.note && <p className="col-span-2 text-xs text-red-700">Admin note: {review.note}</p>}
-          </dl>
-        )}
-
-        {!editing ? (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="dark" icon={<Upload className="size-4" />} disabled={readOnly} onClick={startEditing}>Submit new document</Button>
-            {history.length > 0 && <Button size="sm" variant="ghost" icon={<History className="size-4" />} onClick={() => setShowHistory(h => !h)}>History ({history.length})</Button>}
-          </div>
-        ) : (
-          <div className="space-y-3 rounded-xl border border-ink-200 p-4 dark:border-ink-700">
-            <div className={cx('grid gap-2', HAS_BACK.includes(step.key) && 'sm:grid-cols-2')}>
-              <UploadBox label={HAS_BACK.includes(step.key) ? 'Front' : 'Photo or PDF'} file={front} busy={uploading === 'front'} disabled={readOnly} onClick={() => frontInput.current?.click()} />
-              {HAS_BACK.includes(step.key) && <UploadBox label="Back" file={back} busy={uploading === 'back'} disabled={readOnly} onClick={() => backInput.current?.click()} />}
-            </div>
-            <input ref={frontInput} type="file" accept="image/*,application/pdf" hidden onChange={e => pick('front', e.target.files?.[0])} />
-            <input ref={backInput} type="file" accept="image/*,application/pdf" hidden onChange={e => pick('back', e.target.files?.[0])} />
-            {scanning && <p className="flex items-center gap-2 text-xs font-semibold text-ink-500"><Loader2 className="size-3.5 animate-spin" />Reading your document…</p>}
-            {scanNote && !scanning && <p className="flex items-center gap-2 text-xs text-sky-800 dark:text-sky-300"><ScanText className="size-3.5" />{scanNote}</p>}
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Input label="Number" value={number} onChange={e => setNumber(e.target.value)} disabled={readOnly} wrapperClassName={NEEDS_STATE.includes(step.key) ? '' : 'sm:col-span-2'} />
-              {NEEDS_STATE.includes(step.key) && (
-                <Select label="State" value={state} onChange={e => setState(e.target.value)} disabled={readOnly}>{STATES.map(s => <option key={s}>{s}</option>)}</Select>
+      <div ref={card} data-doc={info.key} className={cx(focus && 'rounded-2xl ring-2 ring-brand-500')}>
+        <CardHeader
+          title={<span className="flex items-center gap-2"><FileUp className="size-5 text-ink-400" />{info.label}{mandatory && <span className="text-xs font-semibold text-ink-400">Required</span>}</span>}
+          subtitle={info.hint}
+          action={status ? <DocStatusBadge status={status} instructor /> : legacyBadge(legacy, review, verified)}
+        />
+        <div className="space-y-4 p-5">
+          {(record || legacy?.url || legacy?.path) && (
+            <dl className="grid grid-cols-2 gap-3 rounded-xl bg-ink-50 p-4 text-sm dark:bg-ink-800/60">
+              <div><dt className="text-xs font-semibold uppercase text-ink-400">Number</dt><dd className="font-semibold">{shownNumber || '—'}</dd></div>
+              <div><dt className="text-xs font-semibold uppercase text-ink-400">Expires</dt>
+                <dd className={cx('font-semibold', left !== null && left < 0 && 'text-red-600', left !== null && left >= 0 && left <= 30 && 'text-amber-600')}>{shownExpiry ? `${formatDocDate(shownExpiry)}${left !== null && left <= 30 ? ` (${describeDaysLeft(left)})` : ''}` : '—'}</dd></div>
+              <div className="col-span-2 flex flex-wrap gap-3">
+                {record && latest
+                  ? latest.files.map((f, i) => <FileButton key={i} label={latest.files.length > 1 ? (f.side === 'back' ? 'Back' : 'Front') : 'View document'} onClick={() => setViewer(f.url ? { url: f.url } : { version: latest.n, index: i })} />)
+                  : <>
+                      {legacy?.url && <FileButton label={legacy.backUrl ? 'Front' : 'View document'} onClick={() => setViewer({ url: legacy.url })} />}
+                      {legacy?.backUrl && <FileButton label="Back" onClick={() => setViewer({ url: legacy.backUrl })} />}
+                    </>}
+              </div>
+              {needsAction && latest.decision?.reason && <p className="col-span-2 text-xs text-red-700 dark:text-red-300">Admin note: {latest.decision.reason}</p>}
+              {!needsAction && review?.status === 'rejected' && review.note && !record && <p className="col-span-2 text-xs text-red-700">Admin note: {review.note}</p>}
+              {latest?.instructorMessage && latest.n === record?.latestVersion && !['verified', 'rejected'].includes(latest.status) && (
+                <p className="col-span-2 flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{latest.instructorMessage}</p>
               )}
-              <Input
-                label="Expiry"
-                type="date"
-                min={dayKey(new Date())}
-                max="2100-12-31"
-                value={expiry}
-                onChange={e => setExpiry(e.target.value)}
-                onBlur={e => { const iso = normaliseExpiry(e.target.value); if (iso && iso !== e.target.value) setExpiry(iso); }}
-                disabled={readOnly}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" loading={saving} disabled={readOnly || !!uploading} onClick={save}>{verified ? 'Send for review' : 'Save document'}</Button>
-              {value?.url && <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setFront(null); setBack(null); setScanNote(null); }}>Cancel</Button>}
-            </div>
-          </div>
-        )}
+              {record && record.verifiedVersion && record.latestVersion !== record.verifiedVersion && (
+                <p className="col-span-2 text-xs text-ink-500">Your verified document (version {record.verifiedVersion}) stays in use while the new upload is reviewed.</p>
+              )}
+            </dl>
+          )}
 
-        {showHistory && (
-          <div className="overflow-x-auto border-t border-ink-100 pt-3 dark:border-ink-800">
-            <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs uppercase text-ink-400"><th className="pb-1.5">Submitted</th><th className="pb-1.5">Expiry</th><th className="pb-1.5">Status</th><th /></tr></thead>
-              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                {[...history].reverse().map((h, i) => (
-                  <tr key={i}>
-                    <td className="py-2">{h.submittedAt ? h.submittedAt.toLocaleDateString('en-AU') : '—'}</td>
-                    <td className="py-2">{formatExpiry(h.expiry)}</td>
-                    <td className="py-2">{h.status === 'approved' ? <Badge tone="green">Approved</Badge> : h.status === 'rejected' ? <Badge tone="red">Rejected</Badge> : h.status === 'pending' ? <Badge tone="amber">Replaced before review</Badge> : <Badge>Replaced</Badge>}</td>
-                    <td className="py-2 text-right">{h.url && <button onClick={() => setPreview(h.url!)} className="text-xs font-bold underline">View</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+          {!editing ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="dark" icon={<Upload className="size-4" />} disabled={readOnly} onClick={startEditing}>{hasAny ? 'Submit new document' : 'Upload document'}</Button>
+              {versions.length > 1 && <Button size="sm" variant="ghost" icon={<History className="size-4" />} onClick={() => setShowHistory(h => !h)}>History ({versions.length})</Button>}
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-ink-200 p-4 dark:border-ink-700">
+              <div className={cx('grid gap-2', info.twoSided && 'sm:grid-cols-2')}>
+                <UploadBox label={info.twoSided ? 'Front' : 'Photo or PDF'} file={front} busy={uploading === 'front'} disabled={readOnly} onClick={() => frontInput.current?.click()} />
+                {info.twoSided && <UploadBox label="Back" file={back} busy={uploading === 'back'} disabled={readOnly} onClick={() => backInput.current?.click()} />}
+              </div>
+              <input ref={frontInput} type="file" accept={ACCEPT} hidden onChange={e => pick('front', e.target.files?.[0])} />
+              <input ref={backInput} type="file" accept={ACCEPT} hidden onChange={e => pick('back', e.target.files?.[0])} />
+              <p className="text-xs text-ink-500">JPG, PNG or PDF, up to 10 MB. Make sure the whole document is in view, sharp and without glare.</p>
+              {scanning && <p className="flex items-center gap-2 text-xs font-semibold text-ink-500"><Loader2 className="size-3.5 animate-spin" />Reading your document…</p>}
+              {scanNote && !scanning && <p className="flex items-center gap-2 text-xs text-sky-800 dark:text-sky-300"><ScanText className="size-3.5" />{scanNote}</p>}
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input label={info.key === 'other' ? 'Number (if any)' : 'Number'} value={number} onChange={e => setNumber(e.target.value)} disabled={readOnly} wrapperClassName={info.needsState ? '' : 'sm:col-span-2'} />
+                {info.needsState && <Select label="State" value={state} onChange={e => setState(e.target.value)} disabled={readOnly}>{STATES.map(s => <option key={s}>{s}</option>)}</Select>}
+                <Input label={info.expiryRequired ? 'Expiry' : 'Expiry (if shown)'} type="date" min={dayKey(new Date())} max="2100-12-31" value={expiry}
+                  onChange={e => setExpiry(e.target.value)} onBlur={e => { const iso = normaliseExpiry(e.target.value); if (iso && iso !== e.target.value) setExpiry(iso); }} disabled={readOnly} />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" loading={saving} disabled={readOnly || !!uploading} onClick={save}>{verified ? 'Send for review' : 'Save document'}</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setFront(null); setBack(null); setScanNote(null); }}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {showHistory && (
+            <div className="overflow-x-auto border-t border-ink-100 pt-3 dark:border-ink-800">
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-xs uppercase text-ink-400"><th className="pb-1.5">Version</th><th className="pb-1.5">Uploaded</th><th className="pb-1.5">Expiry</th><th className="pb-1.5">Status</th><th /></tr></thead>
+                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                  {versions.map(v => (
+                    <tr key={v.id}>
+                      <td className="py-2">{v.n}</td>
+                      <td className="py-2">{v.uploadedAt ? v.uploadedAt.toLocaleDateString('en-AU') : '—'}</td>
+                      <td className="py-2">{formatDocDate(v.approved?.expiry ?? v.entered?.expiry ?? null)}</td>
+                      <td className="py-2"><DocStatusBadge status={v.status} instructor /></td>
+                      <td className="py-2 text-right">{v.files[0] && <button onClick={() => setViewer(v.files[0].url ? { url: v.files[0].url } : { version: v.n, index: 0 })} className="text-xs font-bold underline">View</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
-      <Modal open={!!preview} onClose={() => setPreview(null)} title={step.label} size="lg"
-        footer={preview ? <a href={preview} target="_blank" rel="noreferrer" className="text-sm font-semibold underline">Open full size</a> : undefined}>
-        {preview && (/\.pdf(\?|$)/i.test(decodeURIComponent(preview))
-          ? <iframe src={preview} title={step.label} className="h-[60vh] w-full rounded-xl border border-ink-200 dark:border-ink-700" />
-          : <img src={preview} alt={step.label} className="mx-auto max-h-[60vh] rounded-xl object-contain" />)}
-      </Modal>
+      <DocumentViewer open={!!viewer} onClose={() => setViewer(null)} docId={record?.id} version={viewer?.version} index={viewer?.index} legacyUrl={viewer?.url} title={info.label} />
     </Card>
   );
 }

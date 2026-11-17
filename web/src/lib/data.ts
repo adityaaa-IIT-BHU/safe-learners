@@ -189,7 +189,8 @@ export function useInstructorReviews(instructorId: string | undefined): Live<Rev
 export function useVerifiedInstructors(): Live<UserProfile[]> {
   return useQuery(
     query(collection(db, 'users'), where('role', '==', 'instructor'), where('verificationStatus', '==', 'verified')),
-    mapUser,
+    // Instructors paused for missing or expired mandatory documents can't be booked, so they aren't listed.
+    (id, d) => { const u = mapUser(id, d); return u.compliance?.enforced && u.compliance.eligible === false ? null : u; },
     'instructors:verified',
   );
 }

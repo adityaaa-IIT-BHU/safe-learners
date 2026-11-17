@@ -17,6 +17,8 @@ import {
 
 initializeApp();
 export const db = getFirestore();
+// Optional values (e.g. a comparison note) may be undefined: leave them out instead of failing the write.
+db.settings({ ignoreUndefinedProperties: true });
 export const auth = getAuth();
 export { FieldValue, Timestamp, logger };
 
@@ -242,7 +244,7 @@ export async function notifyAdmins(n: NotificationInput): Promise<void> {
   for (const email of adminEmails()) await sendEmail(email, `[Admin] ${n.title}`, `${n.body}\n\n${APP_URL}${n.link ?? ''}`);
 }
 
-async function emailFor(userId: string): Promise<string | undefined> {
+export async function emailFor(userId: string): Promise<string | undefined> {
   try {
     const user = await auth.getUser(userId);
     if (user.email) return user.email;
@@ -258,11 +260,27 @@ async function emailFor(userId: string): Promise<string | undefined> {
  * Without it, notifications are in-app only and the email is logged.
  */
 export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+  return (await deliverEmail(to, subject, text)).status === 'sent';
+}
+
+export interface EmailResult {
+  status: 'sent' | 'failed' | 'not_configured';
+  /** A failure worth retrying (network, rate limit, provider error). */
+  transient?: boolean;
+  error?: string;
+}
+
+/** Sends one email and reports exactly what happened (for delivery tracking and retries). */
+export async function deliverEmail(to: string, subject: string, text: string): Promise<EmailResult> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM || 'Safe Learners <notifications@safelearners.com.au>';
   if (!key) {
     logger.info('Email not sent (RESEND_API_KEY not configured)', { to, subject });
-    return false;
+    // Local emulator only: keep a copy so tests can check what would have been sent.
+    if (process.env.FUNCTIONS_EMULATOR === 'true') {
+      await db.collection('devEmails').add({ to, subject, text, html: emailHtml(subject, text), createdAt: FieldValue.serverTimestamp() }).catch(() => {});
+    }
+    return { status: 'not_configured' };
   }
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -271,13 +289,14 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
       body: JSON.stringify({ from, to, subject, text, html: emailHtml(subject, text) }),
     });
     if (!res.ok) {
-      logger.error('Email send failed', { status: res.status, body: await res.text() });
-      return false;
+      const body = (await res.text()).slice(0, 300);
+      logger.error('Email send failed', { status: res.status, body });
+      return { status: 'failed', transient: res.status === 429 || res.status >= 500, error: `HTTP ${res.status}: ${body}` };
     }
-    return true;
+    return { status: 'sent' };
   } catch (err) {
     logger.error('Email send failed', err);
-    return false;
+    return { status: 'failed', transient: true, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

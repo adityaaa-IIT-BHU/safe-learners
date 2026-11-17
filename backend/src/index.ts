@@ -28,6 +28,24 @@ export {
 } from './accounts';
 export { applyPriceChanges, completeLessons, expireProposals, lessonReminders } from './scheduled';
 export { reviewDocument, scanDocument, submitDocument } from './documents';
+export {
+  addDocumentNote,
+  changeDocumentCategory,
+  correctDocumentFields,
+  decideDocument,
+  documentTestHooks,
+  documentUsage,
+  getDocumentFile,
+  importLegacyDocuments,
+  recordOfficialCheck,
+  retryDocumentProcessing,
+  runDocumentExpiryNow,
+  saveDocumentSettings,
+  setTestAccount,
+  uploadDocumentVersion,
+} from './docs/api';
+export { documentJobCreated, documentQueueWorker } from './docs/pipeline';
+export { documentDataCleanup, documentExpiryMonitor } from './docs/compliance';
 export { setReviewHidden } from './reviews';
 export {
   cancelApprovedRefund,

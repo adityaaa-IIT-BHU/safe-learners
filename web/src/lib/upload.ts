@@ -20,6 +20,15 @@ async function compressImage(file: File): Promise<Blob> {
   }
 }
 
+/**
+ * Uploads a verification document exactly as chosen (no compression, so OCR and duplicate checks see
+ * the original) and returns its storage path. No download link is created.
+ */
+export async function uploadPrivateDocument(path: string, file: File): Promise<string> {
+  await uploadBytes(ref(storage, path), file, { contentType: file.type });
+  return path;
+}
+
 /** Uploads a file and returns its download URL. */
 export async function uploadFile(path: string, file: File): Promise<string> {
   const body = await compressImage(file);

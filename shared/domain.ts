@@ -50,6 +50,13 @@ export interface CalendarSettings {
 
 export const DEFAULT_PRICING: Pricing = { lesson: 75, testPackage: 225 };
 
+/** Mandatory-document status stored by the eligibility service (see shared/documents.ts). */
+export interface ComplianceStatus {
+  eligible: boolean;
+  enforced?: boolean;
+  calculatedAt?: Date;
+}
+
 export interface UserProfile {
   id: string;
   role: Role;
@@ -62,6 +69,10 @@ export interface UserProfile {
   photoUrl?: string;
   timezone?: string;
   accountStatus?: 'active' | 'disabled';
+  /** Document eligibility (instructors). */
+  compliance?: ComplianceStatus;
+  /** Marked by an admin: document automation in test mode applies only to these accounts. */
+  testAccount?: boolean;
   status?: 'invited' | 'claimed';
   invitedBy?: string;
   inviteEmail?: string;
@@ -131,10 +142,19 @@ export interface DocumentReview {
 export interface VerificationDocument {
   url?: string;
   backUrl?: string;
+  /** Private storage path (uploads since document records; opened through the server). */
+  path?: string;
+  backPath?: string;
+  docId?: string;
+  version?: number;
   number?: string;
   expiry?: string;
+  /** Optional, entered by an admin (YYYY-MM-DD). */
+  issueDate?: string;
   state?: string;
   submittedAt?: Date;
+  /** Set when an admin entered or corrected the details by hand. */
+  editedByAdminAt?: Date;
 }
 
 export interface VerificationDetails {

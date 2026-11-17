@@ -20,6 +20,16 @@ service firebase.storage {
       allow write: if isOwner(uid) && isDocument() && request.resource.size < 10 * 1024 * 1024;
     }
 
+    // Instructor documents: the owner can add files (JPG, PNG or PDF under 10 MB) but nobody can read,
+    // replace or delete them from the browser. Files are opened only through the server, for the
+    // owner or an admin, so no shareable links exist.
+    match /verification-documents/{uid}/{file=**} {
+      allow create: if isOwner(uid)
+        && request.resource.contentType in ['image/jpeg', 'image/png', 'application/pdf']
+        && request.resource.size < 10 * 1024 * 1024;
+      allow read, update, delete: if false;
+    }
+
     // Legacy uploads from the old site stay readable.
     match /instructor-photos/{uid}/{file=**} { allow read: if true; }
     match /vehicle-photos/{uid}/{file=**} { allow read: if true; }
