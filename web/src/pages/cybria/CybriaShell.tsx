@@ -10,7 +10,7 @@ import { useState, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
 import { Button, Input, PageLoader, cx } from '@/components/ui';
-import { errorMessage } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 import { auth } from '@/lib/firebase';
 import { NotFound } from '@/pages/public/NotFound';
 
@@ -106,6 +106,8 @@ export function CybriaLogin() {
         setBusy(true); setError(null);
         try {
           const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+          // Bring the account's access up to date on the server first (it may have changed since the last sign-in).
+          await api.onboardUser({}).catch(() => undefined);
           const t = await cred.user.getIdTokenResult(true);
           if (t.claims.sa !== true) { await signOut(); setError('This sign-in is for Cybria Super Admins only.'); return; }
           navigate(next.startsWith('/cybria') ? next : '/cybria', { replace: true });
