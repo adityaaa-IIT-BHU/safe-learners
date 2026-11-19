@@ -168,4 +168,10 @@ export const api = {
   importLegacyDocuments: callable<{ uid?: string }, { created: number; skipped: number }>('importLegacyDocuments'),
   runDocumentExpiryNow: callable<{ asOf?: string }, { skipped?: string; checked: number; generated: number; emailed: number; statusChanges: number; eligibilityChecked: number }>('runDocumentExpiryNow'),
   documentUsage: callable<Record<string, never>, { pages: number; estimatedUsd: number; queued: number; waiting: number; failed: number }>('documentUsage'),
+
+  // Commission
+  saveCommissionSettings: callable<{ defaultRate: number; introEnabled: boolean; introRate: number; introPlaces: number; effectiveFrom: string; reason: string }, { ok: true; allocation: { allocated: string[]; excluded: string[]; remaining: number } | null }>('saveCommissionSettings'),
+  setInstructorCommission: callable<{ uid: string; rate: number | null; effectiveFrom: string; reason: string }, { ok: true; effective: { rate: number; category: string; effectiveFrom: string } }>('setInstructorCommission'),
+  cancelScheduledCommission: callable<{ id: string; uid?: string; reason: string }, { ok: true }>('cancelScheduledCommission'),
+  allocateIntroNow: callable<Record<string, never>, { allocated: string[]; excluded: string[]; remaining: number; places: number }>('allocateIntroNow'),
 };

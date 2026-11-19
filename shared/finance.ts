@@ -156,13 +156,15 @@ export function lessonLines(
   booking: Pick<Booking, 'price' | 'lessonType' | 'instructorName' | 'startAt' | 'timezone'>,
   s: AccountingSettings,
   instructorGstRegistered: boolean,
+  /** The lesson's commission as a fraction (from commission management); falls back to the settings rate. */
+  feeRate?: number,
 ): InvoiceLine[] {
   const price = money(booking.price ?? 0);
   const label = booking.lessonType ? LESSON_TYPES[booking.lessonType]?.label ?? 'Driving lesson' : 'Driving lesson';
   const when = dayKey(booking.startAt, booking.timezone ?? DEFAULT_TIMEZONE).split('-').reverse().join('/');
   const desc = `${label} with ${booking.instructorName ?? 'your instructor'} on ${when}`;
   if (s.sellerModel === 'agent') {
-    const fee = money(price * s.platformFeeRate);
+    const fee = money(price * (feeRate ?? s.platformFeeRate));
     return [
       line(`${desc}: lesson (collected for the instructor)`, money(price - fee), s.instructorPayableAccount!, instructorGstRegistered ? s.instructorTaxTypeRegistered : s.instructorTaxTypeUnregistered, s),
       line(`${desc}: Safe Learners booking fee`, fee, s.feeAccount!, s.feeTaxType, s),

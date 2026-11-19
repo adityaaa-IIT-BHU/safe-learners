@@ -1,7 +1,8 @@
+import { useInstructorCommission } from '@/lib/commission';
 import { AlertTriangle, BadgeCheck, CalendarClock, CalendarPlus, ChartColumn, Clock, Inbox, Lock, Send, Star, UserPlus, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CLOSED_STATUSES, PLATFORM_FEE_RATE, hasAnyHours, isExpiredProposal, type Booking } from '@shared/domain';
+import { CLOSED_STATUSES, hasAnyHours, isExpiredProposal, type Booking } from '@shared/domain';
 import { DEFAULT_TIMEZONE, dayKey, formatTimeRange } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { BookingRow, lessonLabel } from '@/components/booking';
@@ -17,6 +18,7 @@ export function InstructorDashboard() {
   const me = useProfile();
   const { uid, readOnly } = useAuth();
   const { data: bookings, loading } = useBookings('instructorId', uid);
+  const commission = useInstructorCommission(uid);
   const [tab, setTab] = useState<Tab>('upcoming');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
@@ -34,10 +36,10 @@ export function InstructorDashboard() {
       upcoming: lessons.filter(b => ['confirmed', 'late_cancel_requested'].includes(b.status) && b.endAt.getTime() > now),
       history: lessons.filter(b => b.endAt.getTime() <= now || CLOSED_STATUSES.includes(b.status) || isExpiredProposal(b)).filter(b => b.status !== 'proposed' || isExpiredProposal(b)).reverse(),
       todays: bookings.filter(b => dayKey(b.startAt, tz) === today && ['confirmed', 'late_cancel_requested', 'proposed'].includes(b.status) && !isExpiredProposal(b)),
-      monthEarnings: lessons.filter(b => done(b) && b.startAt >= monthStart).reduce((s, b) => s + (b.price ?? 0) * (1 - PLATFORM_FEE_RATE), 0),
+      monthEarnings: lessons.filter(b => done(b) && b.startAt >= monthStart).reduce((s, b) => s + commission.forBooking(b).earnings, 0),
       learners: new Set(lessons.map(b => b.learnerId).filter(Boolean)).size,
     };
-  }, [bookings, tz]);
+  }, [bookings, tz, commission]);
 
   const verified = me.verificationStatus === 'verified';
   const setupMissing = [

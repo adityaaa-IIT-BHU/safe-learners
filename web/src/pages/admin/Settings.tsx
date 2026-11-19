@@ -5,7 +5,9 @@ import { FlaskConical, Gauge, History, Pause, Play, ScanText, Settings2, ShieldC
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { DOC_TYPES, FEATURE_INFO, isActive, type AutomationFeature, type DocTypeKey, type DocumentSettings } from '@shared/documents';
-import { Badge, Button, Card, CardHeader, Input, Modal, PageHeader, Select, Textarea, cx } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Input, Modal, PageHeader, Select, Tabs, Textarea, cx } from '@/components/ui';
+import { useSearchParams } from 'react-router-dom';
+import { CommissionManagement } from './CommissionManagement';
 import { api, errorMessage } from '@/lib/api';
 import { toDate, useQuery } from '@/lib/data';
 import { useDocumentSettings } from '@/lib/documents';
@@ -34,6 +36,21 @@ const IMPACT: Record<string, { pause: string; resume: string }> = {
 const label = (k: string) => (k === 'automation' ? 'Complete document automation' : FEATURE_INFO.find(f => f.key === k)?.label ?? k);
 
 export function AdminSettings() {
+  const [params, setParams] = useSearchParams();
+  const section = params.get('section') === 'commission' ? 'commission' : 'documents';
+  return (
+    <>
+      <PageHeader title="Settings" subtitle={section === 'commission' ? 'Commission Management' : 'Document Verification Settings'} />
+      <Tabs value={section} onChange={v => setParams({ section: v })} tabs={[
+        { value: 'documents', label: 'Document verification' },
+        { value: 'commission', label: 'Commission management' },
+      ]} />
+      <div className="mt-4">{section === 'commission' ? <CommissionManagement /> : <DocumentVerificationSettings />}</div>
+    </>
+  );
+}
+
+function DocumentVerificationSettings() {
   const s = useDocumentSettings();
   const [pending, setPending] = useState<Pending | null>(null);
   const [reason, setReason] = useState('');
@@ -73,7 +90,6 @@ export function AdminSettings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Document Verification Settings" />
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader title={<span className="flex items-center gap-2"><ScanText className="size-5" />OCR status</span>} subtitle="Automatic reading of uploaded documents" />

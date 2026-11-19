@@ -1,7 +1,9 @@
+import { splitCommission } from '@shared/commission';
+import { useInstructorCommission } from '@/lib/commission';
 import { Clock, Info, Store, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { LESSON_TYPES, PLATFORM_FEE_RATE, calendarOf, lessonPrice, priceChangeEffectiveAt, pricingOf, type Pricing as PriceSet } from '@shared/domain';
+import { LESSON_TYPES, calendarOf, lessonPrice, priceChangeEffectiveAt, pricingOf, type Pricing as PriceSet } from '@shared/domain';
 import { DEFAULT_TIMEZONE, formatDate } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { Button, Card, CardHeader, Input, PageHeader, formatMoney } from '@/components/ui';
@@ -113,6 +115,8 @@ function TierCard({ icon, title, subtitle, lessonValue, onLesson, testValue, onT
   prices: PriceSet;
   offered: ReturnType<typeof calendarOf>['lessonTypes'];
 }) {
+  const { uid } = useAuth();
+  const { rate } = useInstructorCommission(uid);
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2">{icon}{title}</span>} subtitle={subtitle} />
@@ -128,7 +132,7 @@ function TierCard({ icon, title, subtitle, lessonValue, onLesson, testValue, onT
               <span>{LESSON_TYPES[t].label}</span>
               <span className="text-right">
                 <span className="font-bold">{formatMoney(price)}</span>
-                <span className="block text-xs text-ink-500">you earn {formatMoney(price * (1 - PLATFORM_FEE_RATE))}</span>
+                <span className="block text-xs text-ink-500">you earn {formatMoney(splitCommission(price, rate).earnings)}</span>
               </span>
             </li>
           );

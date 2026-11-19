@@ -1,3 +1,4 @@
+import { allocateIntroPlaces, refreshSummary } from './commission';
 import { approveCoreDocuments } from './docs/api';
 import { actorFrom } from './docs/store';
 import { onCall } from 'firebase-functions/v2/https';
@@ -258,6 +259,8 @@ export const reviewVerification = onCall({ ...opts, timeoutSeconds: 120 }, async
     ...(approve ? {
       documentReviews: Object.fromEntries(VERIFICATION_STEPS.map(s => [s.key, { status: 'approved', reviewedAt: Timestamp.now() }])),
       documentsPending: false,
+      // Approval (onboarding) date: decides the order of introductory commission places.
+      ...(instructor.verificationStatus === 'verified' ? {} : { verifiedAt: FieldValue.serverTimestamp() }),
     } : {}),
   });
   await notify(uid, {
@@ -270,6 +273,11 @@ export const reviewVerification = onCall({ ...opts, timeoutSeconds: 120 }, async
   });
   // The documents reviewed with the instructor become verified document versions (with history).
   if (approve) await approveCoreDocuments(uid, actorFrom(req, 'admin'));
+  if (approve) {
+    const a = actorFrom(req, 'admin');
+    await allocateIntroPlaces({ uid: a.uid, name: a.name });
+    await refreshSummary(uid);
+  }
   return { ok: true };
 });
 

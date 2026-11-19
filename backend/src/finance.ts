@@ -1,3 +1,4 @@
+import { rateForBooking } from './commission';
 // Finance records for Xero: one ledger entry (financeTransactions) per financial event, invoices for
 // lessons, credit sources for wallet credit, refund requests with approval, and an append-only audit.
 // Triggers only READ bookings and wallet entries; they never change a booking or a wallet balance.
@@ -243,7 +244,9 @@ export async function ensureLessonInvoice(bookingId: string): Promise<string | n
   const learner = (await db.doc(`users/${b.learnerId}`).get()).data() ?? {};
   const gst = s.sellerModel === 'agent' ? await instructorGstRegistered(b.instructorId) : false;
   const mode = s.lineAmountTypes!;
-  const lines = lessonLines(b, s, gst);
+  // Agent model: the booking fee is the lesson's own commission (fixed when it was confirmed).
+  const feeRate = s.sellerModel === 'agent' && b.instructorId ? (await rateForBooking(b)).rate / 100 : undefined;
+  const lines = lessonLines(b, s, gst, feeRate);
   const t = totals(lines, mode);
   const lessonDate = dayKey(b.startAt, b.timezone);
   const previous = b.rescheduledFrom ? ((await INVOICES.doc(b.rescheduledFrom).get()).exists ? b.rescheduledFrom : null) : null;
@@ -545,10 +548,11 @@ async function refreshInvoice(b: Booking) {
   if (!active || !b.learnerId) return;
   const invRef = INVOICES.doc(b.id);
   const gst = s.sellerModel === 'agent' ? await instructorGstRegistered(b.instructorId) : false;
+  const feeRate = s.sellerModel === 'agent' && b.instructorId ? (await rateForBooking(b)).rate / 100 : undefined;
   const changed = await db.runTransaction(async tx => {
     const inv = (await tx.get(invRef)).data() as InvoiceDoc | undefined;
     if (!inv || inv.closed || inv.voided) return false;
-    const lines = lessonLines(b, s, gst);
+    const lines = lessonLines(b, s, gst, feeRate);
     const t = totals(lines, inv.lineAmountTypes);
     const lessonDate = dayKey(b.startAt, b.timezone);
     if (t.total === inv.total && lessonDate === inv.lessonDate && JSON.stringify(lines) === JSON.stringify(inv.lines)) return false;

@@ -12,6 +12,7 @@ import { api, errorMessage } from '@/lib/api';
 import { useBookings, useDoc, usePrivateProfile, useUser } from '@/lib/data';
 import { db } from '@/lib/firebase';
 import { homePath } from '@/lib/routes';
+import { InstructorCommissionCard } from './InstructorCommission';
 import { useAllUsers } from './Overview';
 
 export function AdminUsers() {
@@ -124,6 +125,7 @@ export function AdminUserDetail() {
           <Stat label="Bookings" value={bookings.filter(b => b.kind === 'lesson').length} />
         </> : null}
       </div>
+      {user.role === 'instructor' && <InstructorCommissionCard uid={user.id} name={user.firstName} />}
       {user.role === 'instructor' && <AdminBankCard uid={user.id} />}
       <Card className="mt-6">
         <CardHeader title="Bookings" />

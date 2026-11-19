@@ -1,9 +1,10 @@
+import { useInstructorCommission } from '@/lib/commission';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, CalendarCheck, CarFront, Clock, GraduationCap, Mail, MapPin, Phone, RefreshCw, StickyNote } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { DRIVING_EXPERIENCE, PLATFORM_FEE_RATE, displayRef, fullName, type Booking } from '@shared/domain';
+import { DRIVING_EXPERIENCE, displayRef, fullName, type Booking } from '@shared/domain';
 import { formatDate, formatTimeRange } from '@shared/time';
 import { useAuth } from '@/auth/AuthProvider';
 import { AddToCalendarButton, BookingTimeline, PaymentBadge, StatusBadge, lessonLabel } from '@/components/booking';
@@ -17,6 +18,7 @@ import { EventDetail } from './EventDetail';
 export function InstructorBookingDetail() {
   const { id } = useParams();
   const { uid, readOnly } = useAuth();
+  const commission = useInstructorCommission(uid);
   const { data: booking, loading } = useBooking(id);
   const { data: learner } = useUser(booking?.learnerId);
 
@@ -29,7 +31,8 @@ export function InstructorBookingDetail() {
   if (booking.kind !== 'lesson') return <EventDetail booking={booking} />;
 
   const canReschedule = booking.kind === 'lesson' && ['confirmed', 'late_cancel_requested'].includes(booking.status) && !readOnly;
-  const net = booking.price !== undefined ? booking.price * (1 - PLATFORM_FEE_RATE) : undefined;
+  const share = booking.price !== undefined ? commission.forBooking(booking) : undefined;
+  const net = share?.earnings;
 
   return (
     <>
@@ -88,7 +91,7 @@ export function InstructorBookingDetail() {
               <CardHeader title="Payment" />
               <div className="grid gap-4 p-5 sm:grid-cols-3">
                 <div><p className="text-xs font-semibold uppercase text-ink-400">Lesson price</p><p className="text-2xl font-extrabold">{formatMoney(booking.price)}</p></div>
-                <div><p className="text-xs font-semibold uppercase text-ink-400">Your earnings</p><p className="text-2xl font-extrabold">{formatMoney(net)}</p><p className="text-xs text-ink-500">after {PLATFORM_FEE_RATE * 100}% service fee</p></div>
+                <div><p className="text-xs font-semibold uppercase text-ink-400">Your earnings</p><p className="text-2xl font-extrabold">{formatMoney(net)}</p><p className="text-xs text-ink-500">after {share ? `${share.rate}% service fee (${formatMoney(share.commission)})` : 'service fee'}{share && !share.fixed ? ' · estimate' : ''}</p></div>
                 <div className="sm:text-right"><PaymentBadge booking={booking} /></div>
               </div>
             </Card>

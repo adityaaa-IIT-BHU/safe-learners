@@ -66,11 +66,11 @@ service cloud.firestore {
       // approved document can't be changed without a new review.
       match /private/{doc} {
         allow read: if isSelf(uid) || isAdmin();
-        allow create: if isAdmin() || (isSelf(uid) && doc != 'banking'
+        allow create: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
           && !request.resource.data.keys().hasAny(['verification', 'verificationHistory']));
-        allow update: if isAdmin() || (isSelf(uid) && doc != 'banking'
+        allow update: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory']));
-        allow delete: if isAdmin() || (isSelf(uid) && doc != 'banking' && doc != 'profile');
+        allow delete: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'profile', 'commission', 'compliance']));
       }
 
       // Payout details: bank account can't be changed by the instructor once saved (security);
@@ -138,7 +138,7 @@ service cloud.firestore {
     // Xero integration: admins can read status, settings, mapping lists, jobs and logs. Tokens
     // (integrations/xero) and OAuth state values are never readable from the browser.
     match /integrations/{doc} {
-      allow read: if (isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus'])
+      allow read: if (isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus', 'commissionSettings'])
         // Document settings hold no secrets; instructors need the mandatory-document list.
         || (signedIn() && doc == 'documentSettings');
     }
@@ -195,6 +195,19 @@ service cloud.firestore {
       allow read: if isAdmin();
     }
     match /ocrUsage/{id} {
+      allow read: if isAdmin();
+    }
+
+    // Commission (written only by Cloud Functions). Each lesson's commission is visible to its own
+    // instructor and to admins, never to learners or other instructors. Settings, instructor
+    // profiles and the change log are for admins only; nobody can edit or delete the change log.
+    match /commissionLedger/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+    }
+    match /commissionProfiles/{id} {
+      allow read: if isAdmin();
+    }
+    match /commissionChanges/{id} {
       allow read: if isAdmin();
     }
 

@@ -46,6 +46,7 @@ export {
 } from './docs/api';
 export { documentJobCreated, documentQueueWorker } from './docs/pipeline';
 export { documentDataCleanup, documentExpiryMonitor } from './docs/compliance';
+export { allocateIntroNow, cancelScheduledCommission, commissionDaily, commissionOnBookingWrite, saveCommissionSettings, setInstructorCommission } from './commission';
 export { setReviewHidden } from './reviews';
 export {
   cancelApprovedRefund,

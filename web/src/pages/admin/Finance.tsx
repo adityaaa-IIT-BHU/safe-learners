@@ -529,7 +529,7 @@ function SettingsForm({ settings }: { settings: AccountingSettings }) {
             <option value="">Choose…</option><option value="Inclusive">Prices include GST</option><option value="Exclusive">Prices exclude GST (GST added on top)</option><option value="NoTax">No GST</option>
           </Select>
           <Input label="Start date" type="date" value={f.startDate ?? ''} onChange={e => set('startDate', e.target.value || null)} hint="Activity before this date is never recorded or sent." />
-          {f.sellerModel === 'agent' && <Input label="Booking fee rate (%)" type="number" step="0.5" value={String(Math.round(f.platformFeeRate * 1000) / 10)} onChange={e => set('platformFeeRate', Number(e.target.value) / 100)} />}
+          {f.sellerModel === 'agent' && <Input label="Fallback booking fee (%)" hint="Each lesson's fee is its commission (Settings → Commission management). This rate is used only for lessons booked before commission management." type="number" step="0.5" value={String(Math.round(f.platformFeeRate * 1000) / 10)} onChange={e => set('platformFeeRate', Number(e.target.value) / 100)} />}
         </div>
       </Card>
       <Card>

@@ -1,7 +1,8 @@
+import { useInstructorCommission } from '@/lib/commission';
 import { Table2, ChartColumn } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PLATFORM_FEE_RATE, displayRef, type Booking } from '@shared/domain';
+import { displayRef, type Booking } from '@shared/domain';
 import { DEFAULT_TIMEZONE, formatDate, toZoned } from '@shared/time';
 import { useAuth, useProfile } from '@/auth/AuthProvider';
 import { lessonLabel } from '@/components/booking';
@@ -11,13 +12,14 @@ import { useBookings } from '@/lib/data';
 // Validated single-series bar colour (passes contrast/lightness on both light and dark surfaces).
 const BAR = '#b38100';
 
-const net = (b: Booking) => (b.price ?? 0) * (1 - PLATFORM_FEE_RATE);
 
 export function Reports() {
   const me = useProfile();
   const { uid } = useAuth();
   const tz = me.timezone ?? DEFAULT_TIMEZONE;
   const { data: bookings } = useBookings('instructorId', uid);
+  const commission = useInstructorCommission(uid);
+  const net = (b: Booking) => commission.forBooking(b).earnings;
   const [asTable, setAsTable] = useState(false);
 
   const r = useMemo(() => {
@@ -59,11 +61,11 @@ export function Reports() {
       upcomingValue: lessons.filter(b => b.status === 'confirmed' && b.startAt > now).reduce((s, b) => s + net(b), 0),
       recentCompleted: [...completed].sort((a, b) => b.startAt.getTime() - a.startAt.getTime()).slice(0, 15),
     };
-  }, [bookings, tz]);
+  }, [bookings, tz, commission]);
 
   return (
     <>
-      <PageHeader title="Reports" subtitle={`Earnings are shown after the ${PLATFORM_FEE_RATE * 100}% Safe Learners service fee.`} />
+      <PageHeader title="Reports" subtitle={`Earnings are shown after the Safe Learners service fee (your current rate: ${commission.rate}%${commission.summary?.upcoming ? `; ${commission.summary.upcoming.rate}% for lessons booked from ${commission.summary.upcoming.effectiveFrom.split('-').reverse().join('/')}` : ''}). Each lesson uses the rate it was booked at.`} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="This month" value={formatMoney(r.thisMonth)} />
         <Stat label={r.fyLabel} value={formatMoney(r.fy)} sub="Financial year to date" />
