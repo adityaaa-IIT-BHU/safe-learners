@@ -3,7 +3,7 @@
 // No record types sync yet: those are switched on per type once the client confirms the accounting rules.
 import { onCall, onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { APP_URL, FieldValue, Timestamp, db, fail, logger, notifyAdmins, requireAdmin } from './core';
+import { APP_URL, FieldValue, Timestamp, db, fail, logger, notifyAdmins, requirePermission, requireSuperAdmin } from './core';
 import {
   MAX_ATTEMPTS,
   REFRESH_TOKEN_DAYS,
@@ -157,7 +157,7 @@ export async function xeroFetch(path: string, init: { method?: string; body?: un
 
 /** Admin starts the connection: returns Xero's consent page URL with a one-time state value. */
 export const xeroConnectUrl = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = requireSuperAdmin(req);
   const { c, missing } = config();
   if (missing.length) fail(`Xero is not configured on the server yet: ${missing.join(', ')}.`);
   const state = newState();
@@ -214,7 +214,7 @@ export const xeroCallback = onRequest({ region: 'australia-southeast1' }, async 
 
 /** Revokes Xero access, deletes the stored tokens and pauses sync. */
 export const xeroDisconnect = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = requireSuperAdmin(req);
   const { c } = config();
   const snap = await CONN.get();
   if (snap.exists && c.tokenKey) {
@@ -237,7 +237,7 @@ export const xeroDisconnect = onCall(opts, async req => {
 
 /** Reads the organisation to confirm the connection works. */
 export const xeroCheckConnection = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'xero', 'view');
   try {
     const { json } = await xeroFetch('/api.xro/2.0/Organisation');
     const org = json?.Organisations?.[0] ?? {};
@@ -252,7 +252,7 @@ export const xeroCheckConnection = onCall(opts, async req => {
 
 /** Server configuration as admins need to see it (names of missing settings only, never values). */
 export const xeroConfigStatus = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'xero', 'view');
   const { c, missing } = config();
   const conn = (await CONN.get()).data();
   const granted = (conn?.scopes ?? []) as string[];
@@ -391,7 +391,7 @@ export const xeroHealthCheck = onSchedule({ ...scheduleOpts, schedule: 'every da
 // ---------- Admin actions ----------
 
 export const xeroSyncNow = onCall({ ...opts, timeoutSeconds: 300 }, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'xero', 'edit');
   const status = (await STATUS.get()).data();
   if (!status?.connected) fail('Connect Xero first.');
   await queueJob('lookups', status.tenantId, {}, { rerun: true });
@@ -409,7 +409,7 @@ export const xeroSyncNow = onCall({ ...opts, timeoutSeconds: 300 }, async req =>
 });
 
 export const xeroRetry = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'xero', 'edit');
   const id = typeof req.data?.jobId === 'string' ? req.data.jobId : '';
   const refs = id ? [JOBS.doc(id)] : (await JOBS.where('status', '==', 'failed').limit(200).get()).docs.map(d => d.ref);
   let count = 0;
@@ -432,7 +432,7 @@ export const xeroRetry = onCall(opts, async req => {
  * and only refunds need approval.
  */
 export const xeroSaveSettings = onCall(opts, async req => {
-  requireAdmin(req);
+  requireSuperAdmin(req);
   fail('These settings moved to Finance → Accounting settings.');
 });
 void SETTINGS;

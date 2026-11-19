@@ -25,7 +25,7 @@ import {
 } from '../../../shared/documents';
 import { parseDate } from '../../../shared/docExtract';
 import { fullName, isExpired, legacyVerificationDocs, normaliseExpiry } from '../../../shared/domain';
-import { FieldValue, db, fail, notify, requireAdmin, requireAuth, requireUser, userFrom } from '../core';
+import { FieldValue, db, fail, notify, requireAuth, requireUser, userFrom, requirePermission, requireSuperAdmin, hasPermission } from '../core';
 import { expiryState, recomputeEligibility, runDocumentCleanup, runExpiryMonitor } from './compliance';
 import { inspectFile } from './fileChecks';
 import { failNextOcrCalls } from './ocrProvider';
@@ -155,7 +155,7 @@ export const getDocumentFile = onCall({ ...opts, memory: '512MiB' }, async req =
   const docId = docIdArg(req.data?.docId);
   const n = nArg(req.data?.version);
   const index = Math.max(0, Math.min(1, Number(req.data?.index ?? 0)));
-  const isAdmin = req.auth!.token.admin === true;
+  const isAdmin = await hasPermission(req, 'documents', 'view');
   if (!isAdmin && docId.split('__')[0] !== uid) fail('You can’t open this document.', 'permission-denied');
   const v = (await versionRef(docId, n).get()).data();
   const f = v?.files?.[index];
@@ -253,7 +253,7 @@ export async function applyDecision(docId: string, n: number, action: DecisionAc
 }
 
 export const decideDocument = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', req.data?.action === 'approve' ? 'approve' : req.data?.action === 'reject' ? 'reject' : 'edit');
   const action = String(req.data?.action) as DecisionAction;
   if (!(action in DECISION_RESULT)) fail('Unknown action.', 'invalid-argument');
   return applyDecision(docIdArg(req.data?.docId), nArg(req.data?.version), action, str(req.data?.reason, 1000), actorFrom(req, 'admin'));
@@ -261,7 +261,7 @@ export const decideDocument = onCall(opts, async req => {
 
 /** Admin corrects extracted values (the original OCR value is kept alongside). */
 export const correctDocumentFields = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', 'edit');
   const docId = docIdArg(req.data?.docId), n = nArg(req.data?.version);
   const { parent, version } = await loadVersion(docId, n);
   const corrections = (req.data?.corrections ?? {}) as Record<string, unknown>;
@@ -291,7 +291,7 @@ export const correctDocumentFields = onCall(opts, async req => {
 
 /** Moves a version to another document category (it is processed again as that type). */
 export const changeDocumentCategory = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', 'edit');
   const docId = docIdArg(req.data?.docId), n = nArg(req.data?.version);
   const newType = typeArg(req.data?.newType);
   const reason = str(req.data?.reason, 500);
@@ -325,7 +325,7 @@ export const changeDocumentCategory = onCall(opts, async req => {
 });
 
 export const addDocumentNote = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', 'edit');
   const docId = docIdArg(req.data?.docId), n = nArg(req.data?.version);
   const text = str(req.data?.text, 2000);
   if (!text) fail('Write a note first.');
@@ -338,7 +338,7 @@ export const addDocumentNote = onCall(opts, async req => {
 
 /** Records the result of an official check with the issuing authority (done by a person, outside the app). */
 export const recordOfficialCheck = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', 'approve');
   const docId = docIdArg(req.data?.docId), n = nArg(req.data?.version);
   const result = String(req.data?.result);
   if (!['confirmed', 'not_confirmed', 'unavailable'].includes(result)) fail('Choose a result.', 'invalid-argument');
@@ -353,7 +353,7 @@ export const recordOfficialCheck = onCall(opts, async req => {
 
 /** Retries (or re-runs) automatic processing for one version. Respects the pause switches. */
 export const retryDocumentProcessing = onCall({ ...opts, timeoutSeconds: 300, memory: '1GiB' }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'ocr', 'edit');
   const docId = docIdArg(req.data?.docId), n = nArg(req.data?.version);
   const fresh = req.data?.fresh === true;
   const { parent, version } = await loadVersion(docId, n);
@@ -386,7 +386,7 @@ function diffSettings(a: DocumentSettings, b: DocumentSettings) {
 }
 
 export const saveDocumentSettings = onCall({ ...opts, timeoutSeconds: 300, memory: '1GiB' }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'ocr', 'settings');
   const actor = actorFrom(req, 'admin');
   const before = await getDocumentSettings(true);
   const next = documentSettingsFrom({ ...before, ...(req.data?.settings ?? {}), features: { ...before.features, ...(req.data?.settings?.features ?? {}) }, requirements: { ...before.requirements, ...(req.data?.settings?.requirements ?? {}) } });
@@ -410,7 +410,7 @@ export const saveDocumentSettings = onCall({ ...opts, timeoutSeconds: 300, memor
 
 /** Test accounts: in test mode, automation, reminders and eligibility changes apply only to these. */
 export const setTestAccount = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'ocr', 'settings');
   const uid = str(req.data?.uid, 128);
   const value = req.data?.testAccount === true;
   const user = userFrom(await db.doc(`users/${uid}`).get());
@@ -424,7 +424,7 @@ export const setTestAccount = onCall(opts, async req => {
 
 /** Creates document records for documents uploaded before this system (no file is re-read). */
 export const importLegacyDocuments = onCall({ ...opts, timeoutSeconds: 540 }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'ocr', 'settings');
   const actor = actorFrom(req, 'admin');
   const only = str(req.data?.uid, 128);
   const users = only ? [await db.doc(`users/${only}`).get()] : (await db.collection('users').where('role', '==', 'instructor').get()).docs;
@@ -459,14 +459,14 @@ export const importLegacyDocuments = onCall({ ...opts, timeoutSeconds: 540 }, as
 });
 
 export const runDocumentExpiryNow = onCall({ ...opts, timeoutSeconds: 540 }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', 'edit');
   // A simulated date is only accepted in the local emulator (for testing reminders).
   const asOf = process.env.FUNCTIONS_EMULATOR === 'true' && typeof req.data?.asOf === 'string' ? new Date(req.data.asOf) : undefined;
   return runExpiryMonitor({ now: asOf, force: true });
 });
 
 export const documentUsage = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'ocr', 'view');
   const pages = await pagesUsedThisMonth();
   const queued = await db.collection('documentJobs').where('status', 'in', ['queued', 'running']).get();
   const failed = await db.collection('documentJobs').where('status', '==', 'failed').get();
@@ -475,7 +475,7 @@ export const documentUsage = onCall(opts, async req => {
 
 /** Local emulator only: simulate OCR outages and run the queue on demand. */
 export const documentTestHooks = onCall({ ...opts, timeoutSeconds: 300, memory: '1GiB' }, async (req: CallableRequest) => {
-  requireAdmin(req);
+  requireSuperAdmin(req);
   if (process.env.FUNCTIONS_EMULATOR !== 'true') fail('Only available in the test emulator.', 'permission-denied');
   if (typeof req.data?.failNext === 'number') await failNextOcrCalls(req.data.failNext);
   if (req.data?.runQueue) return { queue: await runQueue(50) };

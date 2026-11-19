@@ -1,9 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { onAuthStateChanged, signOut as fbSignOut, type User } from 'firebase/auth';
+import { doc } from 'firebase/firestore';
+import { allows, type Action, type AdminStatus, type ModuleKey, type Perms } from '@shared/access';
 import type { UserProfile } from '@shared/domain';
 import { api } from '@/lib/api';
-import { useUser } from '@/lib/data';
-import { auth } from '@/lib/firebase';
+import { useDoc, useUser } from '@/lib/data';
+import { auth, db } from '@/lib/firebase';
 
 interface AuthState {
   user: User | null;
@@ -12,6 +14,12 @@ interface AuthState {
   /** The uid whose data screens should show. */
   uid: string | null;
   isAdmin: boolean;
+  /** Cybria Super Admin (highest level; set only in server configuration). */
+  isSuper: boolean;
+  /** A client admin's own account (role, status, permissions); null for Super Admin and non-admins. */
+  adminAccount: { status: AdminStatus; roleName?: string; perms: Perms } | null;
+  /** Whether this admin may do `action` in `module` (always true for Super Admin). The server checks too. */
+  can: (module: ModuleKey, action?: Action) => boolean;
   /** True while an admin is viewing someone else's account. */
   readOnly: boolean;
   loading: boolean;
@@ -29,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuper, setIsSuper] = useState(false);
   // Routing waits for the first onboarding call after sign-in (it may grant admin rights).
   const [onboarded, setOnboarded] = useState(false);
   const [viewAsUid, setViewAsUid] = useState<string | null>(() => sessionStorageGet(VIEW_AS_KEY));
@@ -44,6 +53,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const token = await current.getIdTokenResult();
     setIsAdmin(token.claims.admin === true);
+    setIsSuper(token.claims.sa === true);
+    // One login record per browser session for admins (login history in the Super Admin).
+    if (token.claims.admin === true && !sessionStorageGet('sl:adminLogin')) {
+      sessionStorageSet('sl:adminLogin', '1');
+      api.recordAdminLogin({}).catch(() => undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -53,12 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setOnboarded(false);
         const token = await u.getIdTokenResult();
         setIsAdmin(token.claims.admin === true);
+        setIsSuper(token.claims.sa === true);
         setAuthReady(true);
         // Don't block the app for long if the network is slow.
         await Promise.race([onboard(), new Promise(r => setTimeout(r, 8000))]);
         setOnboarded(true);
       } else {
         setIsAdmin(false);
+        setIsSuper(false);
+        sessionStorageSet('sl:adminLogin', null);
         setViewAsUid(null);
         sessionStorageSet(VIEW_AS_KEY, null);
         setOnboarded(true);
@@ -69,14 +87,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const effectiveUid = isAdmin && viewAsUid ? viewAsUid : user?.uid ?? null;
   const profileLive = useUser(effectiveUid);
+  const acctLive = useDoc(isAdmin && !isSuper && user ? doc(db, 'adminAccounts', user.uid) : null,
+    (_, d) => ({ status: d.status as AdminStatus, roleName: d.roleName as string | undefined, perms: (d.perms ?? {}) as Perms }), [isAdmin, isSuper]);
+  const adminAccount = acctLive.data;
+  const can = useCallback((module: ModuleKey, action: Action = 'view') => isSuper || (adminAccount?.status === 'active' && allows(adminAccount.perms, module, action)), [isSuper, adminAccount]);
 
   const value = useMemo<AuthState>(() => ({
     user,
     profile: profileLive.data,
     uid: effectiveUid,
     isAdmin,
+    isSuper,
+    adminAccount,
+    can,
     readOnly: isAdmin && !!viewAsUid && viewAsUid !== user?.uid,
-    loading: !authReady || !onboarded || (!!effectiveUid && profileLive.loading),
+    loading: !authReady || !onboarded || (!!effectiveUid && profileLive.loading) || (isAdmin && !isSuper && acctLive.loading),
     viewAs: uid => {
       setViewAsUid(uid);
       sessionStorageSet(VIEW_AS_KEY, uid);
@@ -86,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fbSignOut(auth);
     },
     onboard,
-  }), [user, profileLive.data, profileLive.loading, effectiveUid, isAdmin, viewAsUid, authReady, onboarded, onboard]);
+  }), [user, profileLive.data, profileLive.loading, effectiveUid, isAdmin, isSuper, adminAccount, can, acctLive.loading, viewAsUid, authReady, onboarded, onboard]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

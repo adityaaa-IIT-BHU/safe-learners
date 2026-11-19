@@ -174,4 +174,28 @@ export const api = {
   setInstructorCommission: callable<{ uid: string; rate: number | null; effectiveFrom: string; reason: string }, { ok: true; effective: { rate: number; category: string; effectiveFrom: string } }>('setInstructorCommission'),
   cancelScheduledCommission: callable<{ id: string; uid?: string; reason: string }, { ok: true }>('cancelScheduledCommission'),
   allocateIntroNow: callable<Record<string, never>, { allocated: string[]; excluded: string[]; remaining: number; places: number }>('allocateIntroNow'),
+
+  // Cybria Super Admin
+  recordAdminLogin: callable<Record<string, never>, { ok: boolean }>('recordAdminLogin'),
+  superDashboard: callable<{ from: string; to: string }, SuperDashboard>('superDashboard'),
+  createClientAdmin: callable<{ email: string; firstName: string; surname: string; roleId: string }, { uid: string; setPasswordLink: string }>('createClientAdmin'),
+  updateClientAdmin: callable<{ uid: string; firstName: string; surname: string }, { ok: true }>('updateClientAdmin'),
+  setClientAdminStatus: callable<{ uid: string; status: string; reason: string }, { ok: true }>('setClientAdminStatus'),
+  setClientAdminAccess: callable<{ uid: string; roleId?: string; perms?: Record<string, string>; reason: string }, { ok: true; customised: boolean }>('setClientAdminAccess'),
+  revokeAdminSessions: callable<{ uid: string; reason: string }, { ok: true }>('revokeAdminSessions'),
+  addAdminNote: callable<{ uid: string; text: string }, { ok: true }>('addAdminNote'),
+  adminPasswordLink: callable<{ uid: string; reason?: string }, { link: string }>('adminPasswordLink'),
+  saveAdminRole: callable<{ id?: string; name: string; description: string; perms: Record<string, string>; reason: string }, { id: string; accountsUpdated: number }>('saveAdminRole'),
+  deleteAdminRole: callable<{ id: string; reason: string }, { ok: true }>('deleteAdminRole'),
+  ensureAdminRoles: callable<Record<string, never>, { ok: true }>('ensureAdminRoles'),
 };
+
+export interface SuperDashboard {
+  users: { learners: number; learnersActive: number; learnersInactive: number; instructors: number; instructorsActive: number; instructorsPending: number; instructorsSuspended: number; suspended: number; admins: number; adminsActive: number };
+  bookings: { inRange: number; upcoming: number; completed: number; cancelled: number; pending: number };
+  finance: { walletTotal: number; paymentsRecorded: number; outstanding: number; outstandingCount: number; commission: number; earnings: number; pendingRefunds: number; pendingRefundAmount: number; adjustments: number; adjustmentAmount: number; financeEnabled: boolean };
+  documents: { awaiting: number; expiringSoon: number; expired: number };
+  notifications: { total: number; sent: number; failed: number; notConfigured: number; emailConfigured: boolean };
+  integrations: { xero: { connected: boolean; organisation: string | null; demo: boolean; lastSyncAt: string | null }; ocr: { configured: boolean }; email: { configured: boolean } };
+  alerts: { documentJobsFailed: number; xeroJobsFailed: number; reconciliationOpen: number; financeSyncAttention: number };
+}

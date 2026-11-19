@@ -1,3 +1,4 @@
+import { desiredClaims } from './admins';
 import { allocateIntroPlaces, refreshSummary } from './commission';
 import { approveCoreDocuments } from './docs/api';
 import { actorFrom } from './docs/store';
@@ -13,25 +14,7 @@ import {
   normaliseBooking,
   type UserProfile,
 } from '../../shared/domain';
-import {
-  APP_URL,
-  FieldValue,
-  Timestamp,
-  auth,
-  bookingFields,
-  db,
-  fail,
-  isAdminAccount,
-  notify,
-  notifyAdmins,
-  requireAdmin,
-  requireAuth,
-  requireUser,
-  sendEmail,
-  toDate,
-  userFrom,
-  walletEntry,
-} from './core';
+import { APP_URL, FieldValue, Timestamp, auth, bookingFields, db, fail, isAdminAccount, notify, notifyAdmins, requireAuth, requireUser, sendEmail, toDate, userFrom, walletEntry, requirePermission, requireSuperAdmin } from './core';
 
 const opts = { region: 'australia-southeast1', cors: true };
 
@@ -47,10 +30,11 @@ export const onboardUser = onCall(opts, async req => {
   const email = (req.auth!.token.email || '').toLowerCase();
   let claimsChanged = false;
 
-  // Admin access: ADMIN_UIDS, or a *verified* email on ADMIN_EMAILS.
-  const shouldBeAdmin = isAdminAccount(uid, req.auth!.token);
-  if (shouldBeAdmin !== (req.auth!.token.admin === true)) {
-    await auth.setCustomUserClaims(uid, shouldBeAdmin ? { admin: true } : {});
+  // Access level: Cybria Super Admin (server configuration), an active client admin account, or none.
+  const want = await desiredClaims(uid, req.auth!.token);
+  const shouldBeAdmin = want.admin === true;
+  if (shouldBeAdmin !== (req.auth!.token.admin === true) || (want.sa === true) !== (req.auth!.token.sa === true)) {
+    await auth.setCustomUserClaims(uid, want);
     claimsChanged = true;
   }
 
@@ -247,7 +231,7 @@ export const submitVerification = onCall(opts, async req => {
 });
 
 export const reviewVerification = onCall({ ...opts, timeoutSeconds: 120 }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'instructors', req.data?.approve === true ? 'approve' : 'reject');
   const uid = String(req.data?.uid || '');
   const approve = req.data?.approve === true;
   const reason = String(req.data?.reason || '').slice(0, 500);
@@ -330,8 +314,11 @@ export const submitReview = onCall(opts, async req => {
 // ---------- Admin tools ----------
 
 export const setAccountStatus = onCall(opts, async req => {
-  requireAdmin(req);
   const uid = String(req.data?.uid || '');
+  const target = userFrom(await db.doc(`users/${uid}`).get());
+  // Only learners and instructors here; admin accounts are managed in Client Admin Management.
+  if (!target || (target.role !== 'learner' && target.role !== 'instructor')) fail('Only learner and instructor accounts can be changed here.', 'permission-denied');
+  await requirePermission(req, target.role === 'learner' ? 'learners' : 'instructors', 'edit');
   const status = req.data?.status === 'disabled' ? 'disabled' : 'active';
   await db.doc(`users/${uid}`).update({ accountStatus: status });
   await auth.updateUser(uid, { disabled: status === 'disabled' }).catch(() => undefined);
@@ -339,7 +326,7 @@ export const setAccountStatus = onCall(opts, async req => {
 });
 
 export const adjustWallet = onCall(opts, async req => {
-  const adminUid = requireAdmin(req);
+  const adminUid = await requirePermission(req, 'wallet', 'create');
   const uid = String(req.data?.uid || '');
   const amount = Math.round(Number(req.data?.amount) * 100) / 100;
   const note = String(req.data?.note || 'Adjustment by Safe Learners').slice(0, 200);
@@ -376,7 +363,7 @@ export const adjustWallet = onCall(opts, async req => {
 
 /** One-off: rewrite bookings created by the old site into the new schema (keeps the old fields too). */
 export const migrateLegacyBookings = onCall({ ...opts, timeoutSeconds: 300 }, async req => {
-  requireAdmin(req);
+  requireSuperAdmin(req);
   const snap = await db.collection('bookings').get();
   let migrated = 0;
   let skipped = 0;

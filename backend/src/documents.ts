@@ -3,7 +3,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import { appliesTo, documentId, isActive } from '../../shared/documents';
 import { VERIFICATION_STEPS, fullName, isExpired, type VerificationStepKey } from '../../shared/domain';
 import { parseDocumentText } from '../../shared/ocr';
-import { FieldValue, db, fail, logger, notify, notifyAdmins, requireAdmin, requireAuth, requireUser, userFrom } from './core';
+import { FieldValue, db, fail, logger, notify, notifyAdmins, requireAuth, requireUser, userFrom, requirePermission } from './core';
 import { applyDecision } from './docs/api';
 import { OcrError, ocrProvider } from './docs/ocrProvider';
 import { actorFrom, docBucket, docRef, getDocumentSettings, pagesUsedThisMonth, recordOcrUsage } from './docs/store';
@@ -92,7 +92,7 @@ export const submitDocument = onCall(opts, async req => {
 
 /** Admin approves or rejects a single document (routes to the document records when they exist). */
 export const reviewDocument = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'documents', req.data?.approve === true ? 'approve' : 'reject');
   const uid = String(req.data?.uid || '');
   const key = keyArg(req.data?.key);
   const approve = req.data?.approve === true;

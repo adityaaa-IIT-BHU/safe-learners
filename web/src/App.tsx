@@ -1,4 +1,5 @@
 import { Suspense, lazy, type ReactNode } from 'react';
+import { SectionGuard } from '@/lib/adminAccess';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import type { Role } from '@shared/domain';
@@ -60,6 +61,13 @@ const AdminTools = page(() => import('@/pages/admin/Tools'), 'AdminTools');
 const AdminXero = page(() => import('@/pages/admin/Xero'), 'AdminXero');
 const AdminFinance = page(() => import('@/pages/admin/Finance'), 'AdminFinance');
 const AdminSettings = page(() => import('@/pages/admin/Settings'), 'AdminSettings');
+const CybriaShell = page(() => import('@/pages/cybria/CybriaShell'), 'CybriaShell');
+const CybriaLogin = page(() => import('@/pages/cybria/CybriaShell'), 'CybriaLogin');
+const RequireSuper = page(() => import('@/pages/cybria/CybriaShell'), 'RequireSuper');
+const CybriaDashboard = page(() => import('@/pages/cybria/Dashboard'), 'CybriaDashboard');
+const ClientAdmins = page(() => import('@/pages/cybria/ClientAdmins'), 'ClientAdmins');
+const Roles = page(() => import('@/pages/cybria/Roles'), 'Roles');
+const CommissionManagement = page(() => import('@/pages/admin/CommissionManagement'), 'CommissionManagement');
 
 function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const { user, profile, isAdmin, loading } = useAuth();
@@ -135,16 +143,31 @@ export default function App() {
             </Route>
 
             <Route path="/admin" element={<RequireRole role="admin"><AppShell role="admin" /></RequireRole>}>
-              <Route index element={<AdminOverview />} />
-              <Route path="verifications" element={<AdminVerifications />} />
+              <Route index element={<SectionGuard path="/admin"><AdminOverview /></SectionGuard>} />
+              <Route path="verifications" element={<SectionGuard path="/admin/verifications"><AdminVerifications /></SectionGuard>} />
+              <Route path="users" element={<SectionGuard path="/admin/users"><AdminUsers /></SectionGuard>} />
+              <Route path="users/:id" element={<SectionGuard path="/admin/users"><AdminUser /></SectionGuard>} />
+              <Route path="bookings" element={<SectionGuard path="/admin/bookings"><AdminBookings /></SectionGuard>} />
+              <Route path="reviews" element={<SectionGuard path="/admin/reviews"><AdminReviews /></SectionGuard>} />
+              <Route path="tools" element={<SectionGuard path="/admin/tools"><AdminTools /></SectionGuard>} />
+              <Route path="xero" element={<SectionGuard path="/admin/xero"><AdminXero /></SectionGuard>} />
+              <Route path="finance" element={<SectionGuard path="/admin/finance"><AdminFinance /></SectionGuard>} />
+              <Route path="settings" element={<SectionGuard path="/admin/settings"><AdminSettings /></SectionGuard>} />
+            </Route>
+
+            {/* Cybria Super Admin Control Centre (Super Admin only; others see "not found") */}
+            <Route path="/cybria/login" element={<CybriaLogin />} />
+            <Route path="/cybria" element={<RequireSuper><CybriaShell /></RequireSuper>}>
+              <Route index element={<CybriaDashboard />} />
+              <Route path="admins" element={<ClientAdmins />} />
+              <Route path="roles" element={<Roles />} />
               <Route path="users" element={<AdminUsers />} />
-              <Route path="users/:id" element={<AdminUser />} />
               <Route path="bookings" element={<AdminBookings />} />
-              <Route path="reviews" element={<AdminReviews />} />
-              <Route path="tools" element={<AdminTools />} />
-              <Route path="xero" element={<AdminXero />} />
+              <Route path="documents" element={<AdminVerifications />} />
+              <Route path="ocr" element={<AdminSettings />} />
               <Route path="finance" element={<AdminFinance />} />
-              <Route path="settings" element={<AdminSettings />} />
+              <Route path="commission" element={<CommissionManagement />} />
+              <Route path="xero" element={<AdminXero />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

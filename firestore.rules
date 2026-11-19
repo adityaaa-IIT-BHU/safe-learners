@@ -7,7 +7,24 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
-    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    // Access hierarchy. Cybria Super Admin: the sa claim (set by the server only for accounts in its
+    // configuration). Client admins: adminAccounts/{uid} with status and per-module permission letters
+    // (v view, c create, e edit, d delete, a approve, r reject, x export, s settings), read live so a
+    // change or suspension applies immediately.
+    function isSuper() { return signedIn() && request.auth.token.sa == true; }
+    function adminAcct() { return get(/databases/$(database)/documents/adminAccounts/$(request.auth.uid)).data; }
+    function activeClientAdmin() {
+      return signedIn() && request.auth.token.admin == true
+        && exists(/databases/$(database)/documents/adminAccounts/$(request.auth.uid))
+        && adminAcct().status == 'active';
+    }
+    function anyAdmin() { return isSuper() || activeClientAdmin(); }
+    function can(m, a) { return isSuper() || (activeClientAdmin() && adminAcct().perms.get(m, '').matches('.*' + a + '.*')); }
+    // Admin access to a user's records follows their role (learner or instructor module).
+    function canUser(uid, a) {
+      let role = get(/databases/$(database)/documents/users/$(uid)).data.get('role', '');
+      return isSuper() || (role == 'learner' && can('learners', a)) || (role == 'instructor' && can('instructors', a));
+    }
     function isSelf(uid) { return signedIn() && request.auth.uid == uid; }
     function myProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function isInstructor() {
@@ -40,7 +57,8 @@ service cloud.firestore {
       // instructors linked to them (assigned, invited, or with a booking together).
       allow get, list: if resource.data.role == 'instructor'
         || isSelf(uid)
-        || isAdmin()
+        || isSuper()
+        || (resource.data.role == 'learner' && can('learners', 'v'))
         || (resource.data.role == 'learner' && signedIn() && (
           resource.data.get('instructorId', '') == request.auth.uid
           || resource.data.get('invitedBy', '') == request.auth.uid
@@ -65,20 +83,20 @@ service cloud.firestore {
       // Document details (number, expiry, file) are written only by the server once uploaded, so an
       // approved document can't be changed without a new review.
       match /private/{doc} {
-        allow read: if isSelf(uid) || isAdmin();
-        allow create: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
+        allow read: if isSelf(uid) || canUser(uid, 'v');
+        allow create: if canUser(uid, 'e') || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
           && !request.resource.data.keys().hasAny(['verification', 'verificationHistory']));
-        allow update: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
+        allow update: if canUser(uid, 'e') || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory']));
-        allow delete: if isAdmin() || (isSelf(uid) && !(doc in ['banking', 'profile', 'commission', 'compliance']));
+        allow delete: if canUser(uid, 'd') || (isSelf(uid) && !(doc in ['banking', 'profile', 'commission', 'compliance']));
       }
 
       // Payout details: bank account can't be changed by the instructor once saved (security);
       // billing info and payout frequency stay editable. Admins can update anything.
       match /private/banking {
-        allow read: if isSelf(uid) || isAdmin();
-        allow create: if isSelf(uid) || isAdmin();
-        allow update: if isAdmin() || (
+        allow read: if isSelf(uid) || canUser(uid, 'v');
+        allow create: if isSelf(uid) || canUser(uid, 'e');
+        allow update: if canUser(uid, 'e') || (
           isSelf(uid)
           && (!('bank' in resource.data) || request.resource.data.bank == resource.data.bank)
         );
@@ -86,7 +104,7 @@ service cloud.firestore {
 
       // Wallet ledger (written by Cloud Functions).
       match /transactions/{id} {
-        allow read: if isSelf(uid) || isAdmin();
+        allow read: if isSelf(uid) || can('wallet', 'v');
       }
     }
 
@@ -94,7 +112,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.learnerId == request.auth.uid
         || resource.data.instructorId == request.auth.uid
-        || isAdmin()
+        || can('bookings', 'v')
       );
       // Instructors may keep private notes on their own bookings.
       allow update: if signedIn()
@@ -114,10 +132,10 @@ service cloud.firestore {
 
     match /notifications/{id} {
       allow read: if signedIn() && (
-        resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && isAdmin())
+        resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin())
       );
       allow update: if signedIn()
-        && (resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && isAdmin()))
+        && (resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin()))
         && changedOnly(['read']);
       allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
@@ -127,88 +145,105 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.message is string
         && request.resource.data.message.size() < 5000;
-      allow read: if isAdmin();
+      allow read: if anyAdmin();
     }
 
     match /instructorReferrals/{id} {
       allow create: if signedIn() && request.resource.data.referrerId == request.auth.uid;
-      allow read: if isAdmin() || (signedIn() && resource.data.referrerId == request.auth.uid);
+      allow read: if can('instructors', 'v') || (signedIn() && resource.data.referrerId == request.auth.uid);
     }
 
     // Xero integration: admins can read status, settings, mapping lists, jobs and logs. Tokens
     // (integrations/xero) and OAuth state values are never readable from the browser.
     match /integrations/{doc} {
-      allow read: if (isAdmin() && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups', 'financeStatus', 'commissionSettings'])
+      allow read: if (can('xero', 'v') && doc in ['xeroStatus', 'xeroSettings', 'xeroLookups'])
+        || (can('finance', 'v') && doc in ['financeStatus', 'xeroSettings', 'xeroStatus', 'xeroLookups'])
+        || (can('commission', 'v') && doc == 'commissionSettings')
         // Document settings hold no secrets; instructors need the mandatory-document list.
         || (signedIn() && doc == 'documentSettings');
     }
     match /xeroSyncJobs/{id} {
-      allow read: if isAdmin();
+      allow read: if can('xero', 'v') || can('finance', 'v');
     }
     match /xeroSyncLog/{id} {
-      allow read: if isAdmin();
+      allow read: if can('xero', 'v');
     }
 
     // Finance (written only by Cloud Functions). Learners see their own invoices and refund requests;
     // admins read everything. Nobody, admins included, can edit or delete the audit trail.
     match /invoices/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.learnerId == request.auth.uid);
+      allow read: if can('invoices', 'v') || can('finance', 'v') || (signedIn() && resource.data.learnerId == request.auth.uid);
     }
     match /refundRequests/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow read: if can('finance', 'v') || (signedIn() && resource.data.customerId == request.auth.uid);
     }
     match /financeTransactions/{id} {
-      allow read: if isAdmin();
+      allow read: if can('finance', 'v');
     }
     match /financeCustomers/{id} {
-      allow read: if isAdmin();
+      allow read: if can('finance', 'v');
     }
     match /financeAudit/{id} {
-      allow read: if isAdmin();
+      allow read: if can('finance', 'v');
     }
     match /reconciliationIssues/{id} {
-      allow read: if isAdmin();
+      allow read: if can('finance', 'v');
     }
     match /reconciliationRuns/{id} {
-      allow read: if isAdmin();
+      allow read: if can('finance', 'v');
     }
 
     // Instructor documents (written only by Cloud Functions). Instructors read their own records;
     // review details (comparison, duplicates, risk indicators, notes) are for admins only.
     match /instructorDocuments/{docId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+      allow read: if can('documents', 'v') || (signedIn() && resource.data.instructorId == request.auth.uid);
       match /versions/{v} {
-        allow read: if isAdmin() || (signedIn() && docId.split('__')[0] == request.auth.uid);
+        allow read: if can('documents', 'v') || (signedIn() && docId.split('__')[0] == request.auth.uid);
         match /admin/{d} {
-          allow read: if isAdmin();
+          allow read: if can('documents', 'v');
         }
       }
     }
     match /documentJobs/{id} {
-      allow read: if isAdmin();
+      allow read: if can('ocr', 'v') || can('documents', 'v');
     }
     // Append-only: nobody, admins included, can edit or delete document audit records.
     match /documentAudit/{id} {
-      allow read: if isAdmin();
+      allow read: if can('documents', 'v');
     }
     match /documentNotifications/{id} {
-      allow read: if isAdmin();
+      allow read: if can('documents', 'v');
     }
     match /ocrUsage/{id} {
-      allow read: if isAdmin();
+      allow read: if can('ocr', 'v');
     }
 
     // Commission (written only by Cloud Functions). Each lesson's commission is visible to its own
     // instructor and to admins, never to learners or other instructors. Settings, instructor
     // profiles and the change log are for admins only; nobody can edit or delete the change log.
     match /commissionLedger/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+      allow read: if can('commission', 'v') || (signedIn() && resource.data.instructorId == request.auth.uid);
     }
     match /commissionProfiles/{id} {
-      allow read: if isAdmin();
+      allow read: if can('commission', 'v');
     }
     match /commissionChanges/{id} {
-      allow read: if isAdmin();
+      allow read: if can('commission', 'v');
+    }
+
+    // Cybria Super Admin only (written only by Cloud Functions): client admin accounts, roles, the
+    // admin audit trail and login history. A client admin can read only their own account record.
+    match /adminAccounts/{uid} {
+      allow read: if isSuper() || isSelf(uid);
+    }
+    match /adminRoles/{id} {
+      allow read: if isSuper();
+    }
+    match /adminAudit/{id} {
+      allow read: if isSuper();
+    }
+    match /adminLogins/{id} {
+      allow read: if isSuper();
     }
 
     // Everything else (counters, legacy collections, OCR cache, duplicate indexes) is server-only.

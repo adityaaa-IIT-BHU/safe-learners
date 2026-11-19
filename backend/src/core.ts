@@ -4,6 +4,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentSnapshot, type Transa
 import { HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { dayKey } from '../../shared/time';
+import { MODULES, allows, type Action, type ModuleKey, type Perms } from '../../shared/access';
 import {
   formatBookingRef,
   normaliseBooking,
@@ -69,13 +70,66 @@ export function requireAuth(req: CallableRequest): string {
   return req.auth.uid;
 }
 
-export function requireAdmin(req: CallableRequest): string {
+// ---------- Access hierarchy ----------
+// Cybria Super Admin: SUPER_ADMIN_UIDS, or a *verified* email on SUPER_ADMIN_EMAILS (server
+// configuration only; never grantable in the app). Client admins: adminAccounts/{uid} with a status
+// and per-module permissions, copied into the sign-in token (admin: true, pm: { module: letters }).
+const SUPER_ADMIN_UIDS = listEnv('SUPER_ADMIN_UIDS');
+const SUPER_ADMIN_EMAILS = listEnv('SUPER_ADMIN_EMAILS').map(e => e.toLowerCase());
+
+export function isSuperAccount(uid: string, token: { email?: string; email_verified?: boolean }): boolean {
+  if (SUPER_ADMIN_UIDS.includes(uid)) return true;
+  return !!token.email && token.email_verified === true && SUPER_ADMIN_EMAILS.includes(token.email.toLowerCase());
+}
+
+export const isSuper = (req: CallableRequest) => req.auth?.token.sa === true && isSuperAccount(req.auth.uid, req.auth.token);
+
+const acctCache = new Map<string, { at: number; acct: { status: string; perms: Perms } | null }>();
+/** A client admin's live account (status and permissions), re-read every few seconds so changes bite at once. */
+export async function adminAccountOf(uid: string): Promise<{ status: string; perms: Perms } | null> {
+  const c = acctCache.get(uid);
+  if (c && Date.now() - c.at < 5_000) return c.acct;
+  const d = (await db.doc(`adminAccounts/${uid}`).get()).data();
+  const acct = d ? { status: String(d.status ?? ''), perms: (d.perms ?? {}) as Perms } : null;
+  acctCache.set(uid, { at: Date.now(), acct });
+  return acct;
+}
+export const forgetAdminAccount = (uid: string) => acctCache.delete(uid);
+
+export function requireSuperAdmin(req: CallableRequest): string {
   const uid = requireAuth(req);
-  // Only the custom claim counts; it's granted by onboardUser after the checks in isAdminAccount.
-  if (req.auth!.token.admin !== true) {
-    throw new HttpsError('permission-denied', 'Admins only.');
+  if (!isSuper(req)) throw new HttpsError('permission-denied', 'Cybria Super Admin only.');
+  return uid;
+}
+
+/** Any active admin (super, or a client admin whose account is active). */
+export async function requireAnyAdmin(req: CallableRequest): Promise<string> {
+  const uid = requireAuth(req);
+  if (isSuper(req)) return uid;
+  if (req.auth!.token.admin !== true || (await adminAccountOf(uid))?.status !== 'active') throw new HttpsError('permission-denied', 'Admins only.');
+  return uid;
+}
+
+/** The admin may perform `action` in `module` (always true for Cybria Super Admin). Enforced on the server. */
+export async function requirePermission(req: CallableRequest, module: ModuleKey, action: Action): Promise<string> {
+  const uid = requireAuth(req);
+  if (isSuper(req)) return uid;
+  const acct = req.auth!.token.admin === true ? await adminAccountOf(uid) : null;
+  if (!acct || acct.status !== 'active') throw new HttpsError('permission-denied', 'Admins only.');
+  if (!allows(acct.perms, module, action)) {
+    throw new HttpsError('permission-denied', `You don’t have permission to ${action === 'settings' ? 'change the settings in' : action === 'export' ? 'export from' : action} ${MODULES.find(m => m.key === module)!.label}. Ask Cybria to change your access.`);
   }
   return uid;
+}
+
+/** Whether the caller may do this, without throwing (for optional admin paths). */
+export async function hasPermission(req: CallableRequest, module: ModuleKey, action: Action): Promise<boolean> {
+  try { await requirePermission(req, module, action); return true; } catch { return false; }
+}
+
+/** @deprecated use requirePermission / requireSuperAdmin. Kept for any path not yet mapped: super admin only. */
+export function requireAdmin(req: CallableRequest): string {
+  return requireSuperAdmin(req);
 }
 
 export async function requireUser(uid: string, role?: UserProfile['role']): Promise<UserProfile> {

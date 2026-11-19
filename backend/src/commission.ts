@@ -26,7 +26,7 @@ import {
 } from '../../shared/commission';
 import { fullName, type Booking } from '../../shared/domain';
 import { DEFAULT_TIMEZONE, dayKey } from '../../shared/time';
-import { FieldValue, auth, bookingFrom, db, fail, logger, requireAdmin, userFrom } from './core';
+import { FieldValue, auth, bookingFrom, db, fail, logger, userFrom, requirePermission } from './core';
 
 const REGION = 'australia-southeast1';
 const opts = { region: REGION, cors: true };
@@ -258,7 +258,7 @@ const reasonArg = (v: unknown) => {
 
 /** Adds a new version of the global structure, effective from a date. */
 export const saveCommissionSettings = onCall({ ...opts, timeoutSeconds: 300 }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'commission', 'settings');
   const actor = actorOf(req);
   const d = req.data ?? {};
   const places = Number(d.introPlaces);
@@ -280,7 +280,7 @@ export const saveCommissionSettings = onCall({ ...opts, timeoutSeconds: 300 }, a
 
 /** Sets (rate) or removes (rate null) an instructor's custom commission from a date. */
 export const setInstructorCommission = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'commission', 'edit');
   const actor = actorOf(req);
   const uid = typeof req.data?.uid === 'string' ? req.data.uid : '';
   const user = userFrom(await db.doc(`users/${uid}`).get());
@@ -304,7 +304,7 @@ export const setInstructorCommission = onCall(opts, async req => {
 
 /** Cancels a scheduled change that has not taken effect yet (global version or custom entry). */
 export const cancelScheduledCommission = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'commission', 'edit');
   const actor = actorOf(req);
   const id = String(req.data?.id ?? '');
   const uid = typeof req.data?.uid === 'string' ? req.data.uid : null;
@@ -330,7 +330,7 @@ export const cancelScheduledCommission = onCall(opts, async req => {
 });
 
 export const allocateIntroNow = onCall({ ...opts, timeoutSeconds: 300 }, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'commission', 'edit');
   return allocateIntroPlaces(actorOf(req));
 });
 

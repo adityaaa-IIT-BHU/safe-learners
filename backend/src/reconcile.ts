@@ -3,7 +3,7 @@
 import { onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { CENT, money } from '../../shared/finance';
-import { FieldValue, Timestamp, db, fail, logger, notifyAdmins, requireAdmin } from './core';
+import { FieldValue, Timestamp, db, fail, logger, notifyAdmins, requirePermission } from './core';
 import { AUDIT, CUSTOMERS, INVOICES, REFUNDS, TX, accountingSettings } from './finance';
 import { xeroFetch } from './xero';
 
@@ -163,7 +163,7 @@ export const financeReconcileNightly = onSchedule({ region: 'australia-southeast
 });
 
 export const financeReconcileNow = onCall({ region: 'australia-southeast1', cors: true, timeoutSeconds: 300 }, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'finance', 'edit');
   try {
     return await reconcile(uid);
   } catch (err) {
@@ -174,7 +174,7 @@ export const financeReconcileNow = onCall({ region: 'australia-southeast1', cors
 
 /** Admin marks a discrepancy as resolved, with a note (kept in the audit trail). */
 export const resolveReconciliationIssue = onCall({ region: 'australia-southeast1', cors: true }, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'finance', 'edit');
   const id = String(req.data?.id || '');
   const note = String(req.data?.note || '').trim().slice(0, 1000);
   if (note.length < 3) fail('Add a note saying how this was resolved.', 'invalid-argument');

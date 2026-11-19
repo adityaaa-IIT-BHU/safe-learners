@@ -3,7 +3,13 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function isOwner(uid) { return request.auth != null && request.auth.uid == uid; }
-    function isAdmin() { return request.auth != null && request.auth.token.admin == true; }
+    // Cybria Super Admin, or an active client admin with access to Document Verification.
+    function isAdmin() {
+      return request.auth != null && (request.auth.token.sa == true || (request.auth.token.admin == true
+        && firestore.exists(/databases/(default)/documents/adminAccounts/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/adminAccounts/$(request.auth.uid)).data.status == 'active'
+        && firestore.get(/databases/(default)/documents/adminAccounts/$(request.auth.uid)).data.perms.get('documents', '').matches('.*v.*')));
+    }
     function isImage() { return request.resource.contentType.matches('image/.*'); }
     function isDocument() { return isImage() || request.resource.contentType == 'application/pdf'; }
 

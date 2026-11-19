@@ -1,11 +1,11 @@
 import { onCall } from 'firebase-functions/v2/https';
-import { FieldValue, db, fail, requireAdmin } from './core';
+import { FieldValue, db, fail, requirePermission } from './core';
 
 const opts = { region: 'australia-southeast1', cors: true };
 
 /** Admin hides or shows a review; the instructor's rating only counts visible reviews. */
 export const setReviewHidden = onCall(opts, async req => {
-  requireAdmin(req);
+  await requirePermission(req, 'reviews', 'edit');
   const reviewId = String(req.data?.reviewId || '');
   const hidden = req.data?.hidden === true;
   const reviewRef = db.doc(`reviews/${reviewId}`);

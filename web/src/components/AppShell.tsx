@@ -38,6 +38,7 @@ import { db } from '@/lib/firebase';
 import { useTheme } from '@/lib/theme';
 import { timeAgo } from '@/lib/format';
 import { Avatar, cx } from './ui';
+import { useSectionAccess } from '@/lib/adminAccess';
 
 interface NavItem {
   to: string;
@@ -98,14 +99,17 @@ export function Logo({ className, compact }: { className?: string; compact?: boo
 }
 
 export function AppShell({ role }: { role: Role }) {
-  const { profile, readOnly, viewAs, isAdmin } = useAuth();
+  const { profile, readOnly, viewAs, isAdmin, isSuper } = useAuth();
+  const { allowed } = useSectionAccess();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 
-  const items = NAV[role];
+  const items = role === 'admin'
+    ? [...NAV.admin.filter(i => allowed(i.to)), ...(isSuper ? [{ to: '/cybria', label: 'Cybria Control Centre', icon: ShieldCheck }] : [])]
+    : NAV[role];
   const sidebar = (
     <nav className="flex h-full flex-col gap-1 p-4">
       <Logo className="mb-6 px-2" />

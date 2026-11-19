@@ -31,7 +31,7 @@ import {
   type LineAmountTypes,
 } from '../../shared/finance';
 import { dayKey } from '../../shared/time';
-import { FieldValue, Timestamp, db, fail, logger, notify, notifyAdmins, requireAdmin, requireAuth, toDate, userFrom, walletEntry } from './core';
+import { FieldValue, Timestamp, db, fail, logger, notify, notifyAdmins, requireAuth, toDate, userFrom, walletEntry, requirePermission, hasPermission } from './core';
 import { refundGateway } from './gateway';
 import { queueJob } from './xero';
 
@@ -615,7 +615,7 @@ export const financeOnLearnerWrite = onDocumentWritten({ document: 'users/{uid}'
 /** Learner (or admin) pays what's still due on a lesson from wallet credit. */
 export const payInvoiceFromWallet = onCall(opts, async req => {
   const uid = requireAuth(req);
-  const isAdmin = req.auth!.token.admin === true;
+  const isAdmin = await hasPermission(req, 'invoices', 'view');
   const invoiceId = String(req.data?.invoiceId || '');
   const inv = (await INVOICES.doc(invoiceId).get()).data() as InvoiceDoc | undefined;
   if (!inv || (!isAdmin && inv.learnerId !== uid)) fail('Invoice not found.', 'not-found');
@@ -675,7 +675,7 @@ async function awaitingAmounts(customerId: string, tx?: Transaction): Promise<nu
 
 export const requestRefund = onCall(opts, async req => {
   const uid = requireAuth(req);
-  const isAdmin = req.auth!.token.admin === true;
+  const isAdmin = await hasPermission(req, 'finance', 'create');
   const customerId = isAdmin && req.data?.customerId ? String(req.data.customerId) : uid;
   const amount = money(Number(req.data?.amount));
   const reason = String(req.data?.reason || '').trim().slice(0, 1000);
@@ -716,7 +716,7 @@ export const requestRefund = onCall(opts, async req => {
 });
 
 export const decideRefund = onCall(opts, async req => {
-  const adminUid = requireAdmin(req);
+  const adminUid = await requirePermission(req, 'finance', req.data?.approve === true ? 'approve' : 'reject');
   const id = String(req.data?.id || '');
   if (!id) fail('Refund request not found.', 'not-found');
   const approve = req.data?.approve === true;
@@ -758,7 +758,7 @@ export const decideRefund = onCall(opts, async req => {
 
 /** Admin confirms the bank transfer was made: completes the refund and queues the Xero entry. */
 export const confirmRefundTransfer = onCall(opts, async req => {
-  const adminUid = requireAdmin(req);
+  const adminUid = await requirePermission(req, 'finance', 'approve');
   const id = String(req.data?.id || '');
   if (!id) fail('Refund request not found.', 'not-found');
   const transferReference = String(req.data?.transferReference || '').trim().slice(0, 100);
@@ -802,7 +802,7 @@ export const confirmRefundTransfer = onCall(opts, async req => {
 
 /** An approved refund that can't be paid: the held credit goes back to the wallet. */
 export const cancelApprovedRefund = onCall(opts, async req => {
-  const adminUid = requireAdmin(req);
+  const adminUid = await requirePermission(req, 'finance', 'edit');
   const id = String(req.data?.id || '');
   if (!id) fail('Refund request not found.', 'not-found');
   const note = String(req.data?.reason || '').trim().slice(0, 500);
@@ -832,7 +832,7 @@ const ACCOUNT_FIELDS = [
 
 /** Saves the accounting settings. Switching finance on needs every setting the chosen treatment requires. */
 export const financeSaveSettings = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'finance', 'settings');
   const d = req.data ?? {};
   const current = settingsFrom((await SETTINGS.get()).data());
   const next: AccountingSettings = { ...current };
@@ -864,7 +864,7 @@ export const financeSaveSettings = onCall(opts, async req => {
 
 /** An email-only match flagged for review: link to that Xero contact, or create a new one. */
 export const resolveCustomerMatch = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'finance', 'edit');
   const customerId = String(req.data?.customerId || '');
   const action = req.data?.action === 'link' ? 'link' : 'create';
   const ref = CUSTOMERS.doc(customerId);
@@ -881,7 +881,7 @@ export const resolveCustomerMatch = onCall(opts, async req => {
 
 /** Retries one ledger entry (or every failed one) through the queue. Only the Xero step repeats. */
 export const financeRetry = onCall(opts, async req => {
-  const uid = requireAdmin(req);
+  const uid = await requirePermission(req, 'finance', 'edit');
   const id = req.data?.txId ? String(req.data.txId) : '';
   const snap = id ? [await TX.doc(id).get()] : (await TX.where('syncStatus', 'in', ['failed', 'attention']).limit(200).get()).docs;
   let n = 0;

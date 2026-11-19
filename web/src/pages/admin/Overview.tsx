@@ -1,4 +1,5 @@
-import { collection, limit, orderBy, query } from 'firebase/firestore';
+import { collection, limit, orderBy, query, where } from 'firebase/firestore';
+import { useAuth } from '@/auth/AuthProvider';
 import { BadgeCheck, CalendarDays, GraduationCap, MessageSquareText, Users } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
@@ -18,8 +19,14 @@ export function useAllBookings() {
 }
 
 export function AdminOverview() {
-  const { data: users } = useAllUsers();
-  const { data: bookings } = useAllBookings();
+  // Each figure is shown only to administrators allowed to see it, and each query asks only for
+  // records that administrator may read (so a missing permission never shows as a misleading zero).
+  const { can } = useAuth();
+  const seeLearners = can('learners'), seeInstructors = can('instructors'), seeBookings = can('bookings');
+  const { data: learners } = useQuery(seeLearners ? query(collection(db, 'users'), where('role', '==', 'learner')) : null, mapUser, `admin:learners:${seeLearners}`);
+  const { data: instructors } = useQuery(seeInstructors ? query(collection(db, 'users'), where('role', '==', 'instructor')) : null, mapUser, `admin:instructors:${seeInstructors}`);
+  const users = useMemo(() => [...learners, ...instructors], [learners, instructors]);
+  const { data: bookings } = useQuery(seeBookings ? query(collection(db, 'bookings')) : null, mapBooking, `admin:bookings:${seeBookings}`);
   const { data: notifications } = useNotifications('admin');
   const { data: feedback } = useQuery(
     query(collection(db, 'feedback'), orderBy('createdAt', 'desc'), limit(10)),
@@ -40,12 +47,12 @@ export function AdminOverview() {
   return (
     <>
       <PageHeader title="Admin overview" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Learners" value={stats.learners} icon={<GraduationCap className="size-4" />} />
-        <Stat label="Instructors" value={stats.instructors} icon={<Users className="size-4" />} />
-        <Stat label="Awaiting verification" value={stats.pending} icon={<BadgeCheck className="size-4" />} sub={<Link to="/admin/verifications" className="underline">Review now</Link>} />
-        <Stat label="Bookings this week" value={stats.newBookings} icon={<CalendarDays className="size-4" />} sub={<Link to="/admin/bookings" className="underline">All bookings</Link>} />
-      </div>
+      {(seeLearners || seeInstructors || seeBookings) && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {seeLearners && <Stat label="Learners" value={stats.learners} icon={<GraduationCap className="size-4" />} />}
+        {seeInstructors && <Stat label="Instructors" value={stats.instructors} icon={<Users className="size-4" />} />}
+        {seeInstructors && <Stat label="Awaiting verification" value={stats.pending} icon={<BadgeCheck className="size-4" />} sub={<Link to="/admin/verifications" className="underline">Review now</Link>} />}
+        {seeBookings && <Stat label="Bookings this week" value={stats.newBookings} icon={<CalendarDays className="size-4" />} sub={<Link to="/admin/bookings" className="underline">All bookings</Link>} />}
+      </div>}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title="Activity" />
