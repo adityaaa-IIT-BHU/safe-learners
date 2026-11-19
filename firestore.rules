@@ -85,11 +85,19 @@ service cloud.firestore {
       // approved document can't be changed without a new review.
       match /private/{doc} {
         allow read: if isSelf(uid) || canUser(uid, 'v');
-        allow create: if canUser(uid, 'e') || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
-          && !request.resource.data.keys().hasAny(['verification', 'verificationHistory']));
-        allow update: if canUser(uid, 'e') || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance'])
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory']));
-        allow delete: if canUser(uid, 'd') || (isSelf(uid) && !(doc in ['banking', 'profile', 'commission', 'compliance']));
+        // 'legacy' holds documents imported from the previous website; like 'verification', only the
+        // server may write it, so nobody can add or change document links or expiry dates themselves.
+        // Client admins may edit contact details but not these server-only records (commission and
+        // document eligibility have their own audited functions); Cybria Super Admin is not limited.
+        allow create: if isSuper()
+          || (canUser(uid, 'e') && !(doc in ['commission', 'compliance']) && !request.resource.data.keys().hasAny(['verification', 'verificationHistory', 'legacy']))
+          || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance']) && !request.resource.data.keys().hasAny(['verification', 'verificationHistory', 'legacy']));
+        allow update: if isSuper()
+          || (canUser(uid, 'e') && !(doc in ['commission', 'compliance']) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory', 'legacy']))
+          || (isSelf(uid) && !(doc in ['banking', 'commission', 'compliance']) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verification', 'verificationHistory', 'legacy']));
+        allow delete: if isSuper()
+          || (canUser(uid, 'd') && !(doc in ['profile', 'commission', 'compliance']))
+          || (isSelf(uid) && !(doc in ['banking', 'profile', 'commission', 'compliance']));
       }
 
       // Payout details: bank account can't be changed by the instructor once saved (security);
@@ -119,6 +127,10 @@ service cloud.firestore {
       allow update: if signedIn()
         && resource.data.instructorId == request.auth.uid
         && changedOnly(['instructorNotes']);
+      // Office notes and action records (written by Cloud Functions); never visible to learners or instructors.
+      match /adminNotes/{n} {
+        allow read: if can('bookings', 'v');
+      }
     }
 
     match /reviews/{id} {

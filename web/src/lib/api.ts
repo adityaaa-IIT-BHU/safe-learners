@@ -87,6 +87,9 @@ export const api = {
   withdrawProposal: callable<{ bookingId: string }, { ok: true }>('withdrawProposal'),
   cancelBooking: callable<{ bookingId: string; reason?: string }, { result: 'cancelled' | 'requested' | 'deleted' }>('cancelBooking'),
   resolveLateCancel: callable<{ bookingId: string; decision: 'refund' | 'charge' }, { ok: true }>('resolveLateCancel'),
+  adminCancelBooking: callable<{ bookingId: string; refund: 'refund' | 'fee'; reason: string }, { ok: true; refunded: number }>('adminCancelBooking'),
+  adminMoveBooking: callable<{ bookingId: string; startAt: string; reason: string; outsideHours?: boolean }, { ok: true }>('adminMoveBooking'),
+  adminBookingNote: callable<{ bookingId: string; text: string }, { ok: true }>('adminBookingNote'),
   createEvent: callable<
     {
       kind?: 'event' | 'open';

@@ -1,12 +1,21 @@
 import { DatabaseZap } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Button, Card, CardHeader, PageHeader } from '@/components/ui';
+import { useAuth } from '@/auth/AuthProvider';
+import { Button, Card, CardHeader, EmptyState, PageHeader } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 
 export function AdminTools() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const { isSuper } = useAuth();
+  // Data tools change many records at once, so the server allows them for Cybria Super Admin only.
+  if (!isSuper) return (
+    <>
+      <PageHeader title="Tools" />
+      <Card><EmptyState icon={<DatabaseZap className="size-6" />} title="No tools available" body="Data tools that change many records at once are run by Cybria. Contact Cybria if something needs fixing." /></Card>
+    </>
+  );
   return (
     <>
       <PageHeader title="Tools" />

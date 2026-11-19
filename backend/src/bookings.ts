@@ -49,6 +49,7 @@ import {
   payFromWallet,
   refundToWallet,
   requireAuth,
+  requirePermission,
   requireUser,
   reserveRef,
   userFrom,
@@ -233,10 +234,13 @@ function assertOffered(instructor: UserProfile, lessonType: LessonType) {
   }
 }
 
-function assertWithinHours(instructor: UserProfile, existing: Booking[], start: Date, minutes: number, excludeIds: string[], pickup?: PlaceInput | null) {
+function assertWithinHours(instructor: UserProfile, existing: Booking[], start: Date, minutes: number, excludeIds: string[], pickup?: PlaceInput | null, { packed = true } = {}) {
   const tz = tzOf(instructor);
   const slots = openSlotsForDay({
     ...scheduleOptions(instructor, existing, excludeIds, 15, pickup),
+    // The office may place a lesson anywhere within working hours: smart scheduling's gap-avoiding
+    // packing only shapes the times offered to learners.
+    ...(packed ? {} : { smartBlockMinutes: 0 }),
     day: dayKey(start, tz),
     durationMinutes: minutes,
   });
@@ -613,6 +617,7 @@ export const cancelBooking = onCall(opts, async req => {
       : { paymentStatus: booking.paymentStatus, refunded: 0 };
     tx.update(db.doc(`bookings/${bookingId}`), {
       ...bookingFields({ ...booking, status: 'cancelled', cancelledBy: actor, paymentStatus: back.paymentStatus, cancellationReason: reason || undefined }),
+      cancelledAt: FieldValue.serverTimestamp(),
       history: FieldValue.arrayUnion(historyEntry(reason ? `Cancelled: “${reason}”` : 'Cancelled', actor, actorName)),
     });
     return { booking, result: 'cancelled' as const, actor, refunded: back.refunded > 0 };
@@ -665,6 +670,7 @@ export const resolveLateCancel = onCall(opts, async req => {
     }
     tx.update(db.doc(`bookings/${bookingId}`), {
       ...bookingFields({ ...booking, status: 'cancelled', cancelledBy: 'learner', paymentStatus }),
+      cancelledAt: FieldValue.serverTimestamp(),
       history: FieldValue.arrayUnion(historyEntry(decision === 'refund' ? 'Approved the cancellation with a refund' : 'Approved the cancellation with a fee', 'instructor', booking.instructorName)),
     });
     return { ...booking, refunded };
@@ -800,4 +806,131 @@ export const deleteEvent = onCall(opts, async req => {
   }
   await db.doc(`bookings/${bookingId}`).delete();
   return { deleted: 1 };
+});
+
+// ---------- Admin actions on a booking ----------
+// Admins with Booking Management (edit) can step in when a learner or instructor can't: cancel a
+// lesson, decide a late-cancellation request, or move a lesson to another time with the same
+// instructor. Money is handled exactly as in the learner/instructor flows (wallet refund or fee).
+// Every action needs a reason and is written to the booking history and the private admin notes.
+
+const adminName = (req: { auth?: { token?: { email?: string } } }) => req.auth?.token?.email || 'Admin';
+async function addAdminNote(bookingId: string, text: string, by: string, kind = 'note') {
+  await db.collection(`bookings/${bookingId}/adminNotes`).add({ text, by, kind, at: FieldValue.serverTimestamp(), atMs: Date.now() });
+}
+function reasonOf(v: unknown): string {
+  const r = str(v, 'Reason', { required: true, max: 500 }).trim();
+  if (r.length < 3) fail('Please give a reason.', 'invalid-argument');
+  return r;
+}
+
+/**
+ * Cancel a confirmed lesson, or decide a late-cancellation request. refund = 'refund' returns any
+ * wallet credit used for the lesson; 'fee' keeps it as a cancellation fee (as an instructor's "charge").
+ */
+export const adminCancelBooking = onCall(opts, async req => {
+  await requirePermission(req, 'bookings', 'edit');
+  const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
+  const reason = reasonOf(req.data?.reason);
+  const refund = req.data?.refund === 'fee' ? 'fee' : req.data?.refund === 'refund' ? 'refund' : null;
+  if (!refund) fail('Choose whether to refund the learner or keep a fee.', 'invalid-argument');
+  const by = adminName(req);
+  const booking = await db.runTransaction(async tx => {
+    const booking = bookingFrom(await tx.get(db.doc(`bookings/${bookingId}`)));
+    if (!booking || booking.kind !== 'lesson') fail('Booking not found.', 'not-found');
+    if (booking.status !== 'confirmed' && booking.status !== 'late_cancel_requested') {
+      fail(`A ${STATUS_META[booking.status].label.toLowerCase()} booking can’t be cancelled.`);
+    }
+    const learner = booking.learnerId ? userFrom(await tx.get(db.doc(`users/${booking.learnerId}`))) : null;
+    let paymentStatus = booking.paymentStatus;
+    let refunded = 0;
+    if (refund === 'refund' && learner) {
+      const back = refundToWallet(tx, booking, learner.walletBalance ?? 0, `Cancelled ${booking.ref ?? ''}`.trim());
+      paymentStatus = back.paymentStatus;
+      refunded = back.refunded;
+    } else if (refund === 'fee') {
+      paymentStatus = 'charged';
+    }
+    // A late-cancellation request stays recorded as cancelled by the learner; otherwise the office cancelled.
+    const cancelledBy = booking.status === 'late_cancel_requested' ? 'learner' : 'admin';
+    tx.update(db.doc(`bookings/${bookingId}`), {
+      ...bookingFields({ ...booking, status: 'cancelled', cancelledBy, paymentStatus, cancellationReason: booking.cancellationReason ?? reason }),
+      cancelledAt: FieldValue.serverTimestamp(),
+      history: FieldValue.arrayUnion(historyEntry(
+        `${booking.status === 'late_cancel_requested' ? 'Late cancellation decided by the office' : 'Cancelled by the office'} (${refund === 'refund' ? 'refunded' : 'fee kept'}): “${reason}”`, 'admin', by)),
+    });
+    return { ...booking, refunded };
+  });
+  await addAdminNote(bookingId, `${booking.status === 'late_cancel_requested' ? 'Late cancellation decided' : 'Cancelled'} (${refund === 'refund' ? 'refund to wallet' : 'fee kept'}): ${reason}`, by, 'cancel');
+  await notify(booking.learnerId, {
+    type: 'booking_cancelled',
+    title: `Booking ${booking.ref ?? ''} cancelled`.trim(),
+    body: `Your lesson on ${when(booking)} was cancelled by the Safe Learners office.` +
+      (refund === 'refund' ? (booking.refunded > 0 ? ` $${booking.refunded.toFixed(2)} is back in your wallet.` : '') : ' A cancellation fee applies.') +
+      ` Reason: “${reason}”`,
+    link: `/learner/bookings/${booking.id}`,
+  });
+  await notify(booking.instructorId, {
+    type: 'booking_cancelled',
+    title: `Booking ${booking.ref ?? ''} cancelled`.trim(),
+    body: `The lesson with ${booking.learnerName} on ${when(booking)} was cancelled by the office. Reason: “${reason}”`,
+    link: `/instructor/bookings/${booking.id}`,
+  });
+  return { ok: true, refunded: booking.refunded };
+});
+
+/** Move a confirmed lesson to a new time with the same instructor. Payment and commission stay as they are. */
+export const adminMoveBooking = onCall(opts, async req => {
+  await requirePermission(req, 'bookings', 'edit');
+  const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
+  const startAt = dateArg(req.data?.startAt, 'New time');
+  const reason = reasonOf(req.data?.reason);
+  const outsideHours = req.data?.outsideHours === true;
+  if (startAt.getTime() < Date.now()) fail('Choose a time in the future.', 'invalid-argument');
+  const by = adminName(req);
+  const { booking, endAt } = await db.runTransaction(async tx => {
+    const booking = bookingFrom(await tx.get(db.doc(`bookings/${bookingId}`)));
+    if (!booking || booking.kind !== 'lesson') fail('Booking not found.', 'not-found');
+    if (booking.status !== 'confirmed') fail('Only confirmed lessons can be moved.');
+    const instructor = userFrom(await tx.get(db.doc(`users/${booking.instructorId}`)));
+    if (!instructor) fail('Instructor not found.', 'not-found');
+    const minutes = Math.round((booking.endAt.getTime() - booking.startAt.getTime()) / 60_000);
+    const endAt = new Date(startAt.getTime() + minutes * 60_000);
+    const existing = await instructorBookings(tx, booking.instructorId);
+    // Never double-book. The instructor's usual hours can be overridden by the office (recorded).
+    assertSlotFree(existing, startAt, endAt, { excludeIds: [booking.id] });
+    if (!outsideHours) assertWithinHours(instructor, existing, startAt, minutes, [booking.id], null, { packed: false });
+    tx.update(db.doc(`bookings/${bookingId}`), {
+      ...bookingFields({ ...booking, startAt, endAt }),
+      reminderSent: false,
+      history: FieldValue.arrayUnion(historyEntry(`Moved by the office from ${when(booking)}${outsideHours ? ' (outside usual hours)' : ''}: “${reason}”`, 'admin', by)),
+    });
+    return { booking, endAt };
+  });
+  const moved = { ...booking, startAt, endAt };
+  await addAdminNote(bookingId, `Moved from ${when(booking)} to ${when(moved)}${outsideHours ? ' (outside usual hours)' : ''}: ${reason}`, by, 'move');
+  await notify(booking.learnerId, {
+    type: 'booking_moved',
+    title: `Lesson ${booking.ref ?? ''} moved`.trim(),
+    body: `The office moved your lesson from ${when(booking)} to ${when(moved)}. Reason: “${reason}”`,
+    link: `/learner/bookings/${booking.id}`,
+  });
+  await notify(booking.instructorId, {
+    type: 'booking_moved',
+    title: `Lesson ${booking.ref ?? ''} moved`.trim(),
+    body: `The office moved ${booking.learnerName}’s lesson from ${when(booking)} to ${when(moved)}. Reason: “${reason}”`,
+    link: `/instructor/bookings/${booking.id}`,
+  });
+  return { ok: true };
+});
+
+/** A private note on a booking for administrators (never shown to the learner or instructor). */
+export const adminBookingNote = onCall(opts, async req => {
+  await requirePermission(req, 'bookings', 'edit');
+  const bookingId = str(req.data?.bookingId, 'bookingId', { max: 128 });
+  const text = str(req.data?.text, 'Note', { required: true, max: 1000 }).trim();
+  if (!text) fail('Write a note first.', 'invalid-argument');
+  if (!(await db.doc(`bookings/${bookingId}`).get()).exists) fail('Booking not found.', 'not-found');
+  await addAdminNote(bookingId, text, adminName(req));
+  return { ok: true };
 });

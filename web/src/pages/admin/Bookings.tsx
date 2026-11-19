@@ -1,9 +1,10 @@
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { STATUS_META, displayRef, type BookingStatus } from '@shared/domain';
 import { BookingRow } from '@/components/booking';
 import { Badge, Button, Card, EmptyState, PageHeader, Select } from '@/components/ui';
+import { BookingAdmin } from './BookingAdmin';
 import { useAllBookings } from './Overview';
 
 type WhenFilter = 'upcoming' | 'today' | 'period';
@@ -16,6 +17,12 @@ export function AdminBookings() {
   const [status, setStatus] = useState<'all' | 'pending' | BookingStatus>(() => (params.get('status') as BookingStatus | 'pending') || 'all');
   const [search, setSearch] = useState(() => params.get('q') ?? '');
   const when = params.get('when') as WhenFilter | null;
+  const [shown, setShown] = useState(100);
+  const openId = params.get('open');
+  const opened = openId ? bookings.find(b => b.id === openId) ?? null : null;
+  const { pathname } = useLocation();
+  const linkFor = (id: string) => { const p = new URLSearchParams(params); p.set('open', id); return `${pathname}?${p.toString()}`; };
+  const close = () => { const p = new URLSearchParams(params); p.delete('open'); setParams(p, { replace: true }); };
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
     const now = Date.now();
@@ -33,7 +40,7 @@ export function AdminBookings() {
 
   return (
     <>
-      <PageHeader title="All bookings" subtitle={`${list.length} shown`} />
+      <PageHeader title="All bookings" subtitle={`${list.length} lesson${list.length === 1 ? '' : 's'} match${list.length > shown ? ` · showing the first ${shown}` : ''}. Click a lesson to see its details and office actions.`} />
       <Card className="mb-4 grid gap-3 p-3 sm:grid-cols-[1fr_220px]">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-400" />
@@ -52,10 +59,14 @@ export function AdminBookings() {
         </p>
       )}
       <div className="space-y-3">
-        {list.length === 0 ? <Card><EmptyState title="No bookings match" /></Card> : list.slice(0, 100).map(b => (
-          <BookingRow key={b.id} booking={b} to="#" person={{ name: `${b.learnerName ?? '?'} ↔ ${b.instructorName ?? '?'}` }} />
+        {list.length === 0 ? <Card><EmptyState title="No bookings match" /></Card> : list.slice(0, shown).map(b => (
+          <BookingRow key={b.id} booking={b} to={linkFor(b.id)} highlight={b.id === openId} person={{ name: `${b.learnerName ?? '?'} ↔ ${b.instructorName ?? '?'}` }} />
         ))}
+        {list.length > shown && (
+          <div className="flex justify-center"><Button variant="secondary" onClick={() => setShown(n => n + 100)}>Show {Math.min(100, list.length - shown)} more ({list.length - shown} not shown yet)</Button></div>
+        )}
       </div>
+      {opened && <BookingAdmin booking={opened} onClose={close} />}
     </>
   );
 }

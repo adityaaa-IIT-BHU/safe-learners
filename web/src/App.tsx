@@ -23,6 +23,8 @@ const ResetPassword = page(() => import('@/pages/public/Auth'), 'ResetPassword')
 const FindInstructors = page(() => import('@/pages/public/FindInstructors'), 'FindInstructors');
 const InstructorProfile = page(() => import('@/pages/public/InstructorProfile'), 'InstructorProfile');
 const Support = page(() => import('@/pages/public/Support'), 'Support');
+const Terms = page(() => import('@/pages/public/Legal'), 'Terms');
+const Privacy = page(() => import('@/pages/public/Legal'), 'Privacy');
 const NotFound = page(() => import('@/pages/public/NotFound'), 'NotFound');
 
 // Learner
@@ -110,6 +112,8 @@ export default function App() {
             <Route path="/instructors" element={<FindInstructors />} />
             <Route path="/instructors/:id" element={<InstructorProfile />} />
             <Route path="/support" element={<Support audience="learner" />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
             <Route path="/app" element={<AppRedirect />} />
 
             <Route path="/learner" element={<RequireRole role="learner"><AppShell role="learner" /></RequireRole>}>

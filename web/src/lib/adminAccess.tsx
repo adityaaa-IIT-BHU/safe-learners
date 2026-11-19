@@ -7,7 +7,7 @@ import type { Action, ModuleKey } from '@shared/access';
 import { useAuth } from '@/auth/AuthProvider';
 import { Card, EmptyState } from '@/components/ui';
 
-export const ADMIN_SECTIONS: { path: string; needs: [ModuleKey, Action][] }[] = [
+export const ADMIN_SECTIONS: { path: string; needs: [ModuleKey, Action][]; superOnly?: boolean }[] = [
   { path: '/admin', needs: [['reports', 'view']] },
   { path: '/admin/verifications', needs: [['instructors', 'view']] },
   { path: '/admin/users', needs: [['learners', 'view'], ['instructors', 'view']] },
@@ -15,17 +15,19 @@ export const ADMIN_SECTIONS: { path: string; needs: [ModuleKey, Action][] }[] = 
   { path: '/admin/reviews', needs: [['reviews', 'view']] },
   { path: '/admin/finance', needs: [['finance', 'view'], ['invoices', 'view'], ['wallet', 'view']] },
   { path: '/admin/xero', needs: [['xero', 'view']] },
-  { path: '/admin/tools', needs: [['tools', 'view']] },
+  // Data tools change many records at once: Cybria Super Admin only (the server enforces the same).
+  { path: '/admin/tools', needs: [['tools', 'view']], superOnly: true },
   { path: '/admin/settings', needs: [['commission', 'view']] },
 ];
 
 export function useSectionAccess() {
-  const { can } = useAuth();
+  const { can, isSuper } = useAuth();
+  const ok = (s: (typeof ADMIN_SECTIONS)[number]) => (!s.superOnly || isSuper) && s.needs.some(([m, a]) => can(m, a));
   const allowed = (path: string) => {
     const s = ADMIN_SECTIONS.find(x => x.path === path);
-    return !s || s.needs.some(([m, a]) => can(m, a));
+    return !s || ok(s);
   };
-  return { allowed, first: ADMIN_SECTIONS.find(s => s.needs.some(([m, a]) => can(m, a)))?.path ?? null };
+  return { allowed, first: ADMIN_SECTIONS.find(ok)?.path ?? null };
 }
 
 /** Shows a section only to admins with access to it (the server enforces the same rules). */

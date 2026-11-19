@@ -181,7 +181,7 @@ export function Signup({ role }: { role: Extract<Role, 'learner' | 'instructor'>
         <Input label="Password" type="password" autoComplete="new-password" {...form.register('password')} error={e.password?.message} />
         <label className="flex items-start gap-3 text-sm text-ink-600 dark:text-ink-300">
           <input type="checkbox" className="mt-0.5 size-4 accent-brand-500" {...form.register('terms')} />
-          <span>I agree to the Safe Learners terms of use and privacy policy.</span>
+          <span>I agree to the Safe Learners <Link to="/terms" target="_blank" className="font-semibold underline">terms of use</Link> and <Link to="/privacy" target="_blank" className="font-semibold underline">privacy policy</Link>.</span>
         </label>
         {e.terms && <p className="text-xs font-medium text-red-600">{e.terms.message}</p>}
         {e.root && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{e.root.message}</p>}

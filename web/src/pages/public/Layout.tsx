@@ -54,7 +54,7 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-ink-200/60 py-5 text-center text-xs text-ink-400 dark:border-ink-800">
-        © {new Date().getFullYear()} Safe Learners Australia
+        © {new Date().getFullYear()} Safe Learners Australia · <Link to="/terms" className="underline hover:text-ink-700">Terms of use</Link> · <Link to="/privacy" className="underline hover:text-ink-700">Privacy policy</Link>
       </div>
     </footer>
   );

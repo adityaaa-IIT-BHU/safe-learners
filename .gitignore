@@ -85,3 +85,9 @@ pubsub-debug.log
 # OS / editor
 .DS_Store
 .vscode/
+
+# End-to-end test output and files the documents suite generates
+e2e/results/
+e2e/suites/specimens/tiny.gif
+e2e/suites/specimens/fresh1.png
+e2e/suites/specimens/fresh2.png

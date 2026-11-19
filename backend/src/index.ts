@@ -13,6 +13,9 @@ export {
   resolveLateCancel,
   respondToProposal,
   withdrawProposal,
+  adminBookingNote,
+  adminCancelBooking,
+  adminMoveBooking,
 } from './bookings';
 export {
   adjustWallet,
