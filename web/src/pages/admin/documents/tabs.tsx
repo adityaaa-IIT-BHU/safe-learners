@@ -56,7 +56,7 @@ export function AutomationStrip() {
         {s.testMode && <Badge tone="blue">Test mode: test accounts only</Badge>}
         <span className="flex-1" />
         <span>{waiting} awaiting processing</span><span>·</span><span>{manual} need manual verification</span><span>·</span><span className={cx(failed && 'font-bold text-red-600')}>{failed} failed</span>
-        <Link to="/admin/settings" className="font-semibold underline">Settings</Link>
+        <Link to="/cybria/ocr" className="font-semibold underline">Settings</Link>
       </div>
     </div>
   );
@@ -224,7 +224,7 @@ export function ComplianceTab({ users }: { users: UserProfile[] }) {
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
                 {shown.map(({ u, mine, c, stored, known }) => (
                   <tr key={u.id}>
-                    <td className="px-4 py-3 font-semibold"><Link to={`/admin/verifications?tab=documents&instructor=${encodeURIComponent(fullName(u))}`} className="underline">{fullName(u)}</Link></td>
+                    <td className="px-4 py-3 font-semibold"><Link to={`/cybria/documents?tab=documents&instructor=${encodeURIComponent(fullName(u))}`} className="underline">{fullName(u)}</Link></td>
                     <td className="px-4 py-3">{!known ? <Badge>Earlier records</Badge> : c.eligible ? <Badge tone="green">Meets rules</Badge> : <Badge tone="red">Action needed</Badge>}
                       {!known ? <span className="block text-xs text-ink-400">Not imported yet</span> : !stored && <span className="block text-xs text-ink-400">{settings.features.eligibilityUpdates ? 'Not yet calculated' : 'Not enforced (updates paused)'}</span>}</td>
                     {mandatory.map(t => {

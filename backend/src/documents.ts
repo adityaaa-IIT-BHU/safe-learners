@@ -3,7 +3,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import { appliesTo, documentId, isActive } from '../../shared/documents';
 import { VERIFICATION_STEPS, fullName, isExpired, type VerificationStepKey } from '../../shared/domain';
 import { parseDocumentText } from '../../shared/ocr';
-import { FieldValue, db, fail, logger, notify, notifyAdmins, requireAuth, requireUser, userFrom, requirePermission } from './core';
+import { FieldValue, db, fail, logger, notify, notifyCybria, requireAuth, requireUser, userFrom, requirePermission } from './core';
 import { applyDecision } from './docs/api';
 import { OcrError, ocrProvider } from './docs/ocrProvider';
 import { actorFrom, docBucket, docRef, getDocumentSettings, pagesUsedThisMonth, recordOcrUsage } from './docs/store';
@@ -80,11 +80,11 @@ export const submitDocument = onCall(opts, async req => {
   });
   // Instructors who are already verified stay bookable while an update is reviewed.
   if (instructor.verificationStatus === 'verified') {
-    await notifyAdmins({
+    await notifyCybria({
       type: 'document_update',
       title: 'Document update to review',
       body: `${fullName(instructor)} submitted a new ${labelOf(key).toLowerCase()} (expires ${doc.expiry}).`,
-      link: '/admin/verifications',
+      link: '/cybria/documents?tab=updates',
     });
   }
   return { ok: true };

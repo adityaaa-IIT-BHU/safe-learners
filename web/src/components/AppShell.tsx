@@ -71,16 +71,18 @@ const NAV: Record<Role, NavItem[]> = {
     { to: '/instructor/settings', label: 'Settings', icon: Settings },
     { to: '/instructor/support', label: 'Help & support', icon: LifeBuoy },
   ],
+  // Client Admin Panel, A–Z by the label shown. Cybria Control Centre, Document Verification and OCR
+  // are not here: they live only in the Cybria Super Admin panel (/cybria).
   admin: [
-    { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
-    { to: '/admin/verifications', label: 'Verifications', icon: ShieldCheck },
-    { to: '/admin/users', label: 'Users', icon: Users },
     { to: '/admin/bookings', label: 'Bookings', icon: CalendarDays },
-    { to: '/admin/reviews', label: 'Reviews', icon: Star },
+    { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/admin/finance', label: 'Finance', icon: Landmark },
-    { to: '/admin/xero', label: 'Xero', icon: ArrowLeftRight },
-    { to: '/admin/tools', label: 'Tools', icon: Wrench },
+    { to: '/admin/verifications', label: 'Instructor Approvals', icon: ShieldCheck },
+    { to: '/admin/reviews', label: 'Reviews', icon: Star },
     { to: '/admin/settings', label: 'Settings', icon: Settings },
+    { to: '/admin/tools', label: 'Tools', icon: Wrench },
+    { to: '/admin/users', label: 'Users', icon: Users },
+    { to: '/admin/xero', label: 'Xero', icon: ArrowLeftRight },
   ],
 };
 
@@ -99,7 +101,7 @@ export function Logo({ className, compact }: { className?: string; compact?: boo
 }
 
 export function AppShell({ role }: { role: Role }) {
-  const { profile, readOnly, viewAs, isAdmin, isSuper } = useAuth();
+  const { profile, readOnly, viewAs, isAdmin } = useAuth();
   const { allowed } = useSectionAccess();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
@@ -108,7 +110,7 @@ export function AppShell({ role }: { role: Role }) {
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 
   const items = role === 'admin'
-    ? [...NAV.admin.filter(i => allowed(i.to)), ...(isSuper ? [{ to: '/cybria', label: 'Cybria Control Centre', icon: ShieldCheck }] : [])]
+    ? NAV.admin.filter(i => allowed(i.to)).sort((a, b) => a.label.localeCompare(b.label, 'en-AU'))
     : NAV[role];
   const sidebar = (
     <nav className="flex h-full flex-col gap-1 p-4">
@@ -217,7 +219,7 @@ function useClickOutside(onOutside: () => void) {
   return ref;
 }
 
-function NotificationBell({ userId }: { userId?: string }) {
+export function NotificationBell({ userId }: { userId?: string }) {
   const { readOnly } = useAuth();
   const [open, setOpen] = useState(false);
   const { data: items } = useNotifications(userId);

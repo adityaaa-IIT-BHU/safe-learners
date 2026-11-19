@@ -1,7 +1,7 @@
 // Access hierarchy: Cybria Super Admin (set only in server configuration) and client admins, whose
 // access is a role plus per-module permissions chosen by Cybria. Shared by the web app and Cloud
-// Functions. Permissions travel in the admin's sign-in token as { pm: { module: "vce…" } } so the
-// database rules and every server function enforce them.
+// Functions. Permissions are stored in adminAccounts and read live by the database
+// rules and every server function. Document Verification and OCR are Cybria Super Admin only.
 
 export const ACTIONS = [
   { key: 'view', letter: 'v', label: 'View' },
@@ -26,8 +26,8 @@ export const MODULES = [
   { key: 'wallet', label: 'Wallet Management', help: 'Learner wallets, credits and adjustments' },
   { key: 'commission', label: 'Commission Management', help: 'Commission structure and instructor rates' },
   { key: 'invoices', label: 'Invoice Management', help: 'Lesson invoices and credit notes' },
-  { key: 'documents', label: 'Document Verification', help: 'Instructor documents and decisions' },
-  { key: 'ocr', label: 'OCR and Automation', help: 'Automation switches, test mode and processing' },
+  { key: 'documents', label: 'Document Verification', help: 'Instructor documents and decisions (Cybria Super Admin only)', superOnly: true },
+  { key: 'ocr', label: 'OCR and Automation', help: 'Automation switches, test mode and processing (Cybria Super Admin only)', superOnly: true },
   { key: 'notifications', label: 'Notifications', help: 'Admin notifications' },
   { key: 'reports', label: 'Reports', help: 'Dashboards and reports' },
   { key: 'reviews', label: 'Reviews', help: 'Learner reviews of instructors' },
@@ -37,20 +37,26 @@ export const MODULES = [
 ] as const;
 export type ModuleKey = (typeof MODULES)[number]['key'];
 export const MODULE_KEYS = MODULES.map(m => m.key) as ModuleKey[];
+/** Modules kept for Cybria Super Admin only: never part of a client admin's permissions. */
+export const SUPER_ONLY_MODULES = MODULES.filter(m => 'superOnly' in m && m.superOnly).map(m => m.key) as ModuleKey[];
+export const isSuperOnlyModule = (m: ModuleKey) => SUPER_ONLY_MODULES.includes(m);
+/** Modules that can be granted to client admins. */
+export const CLIENT_MODULES = MODULES.filter(m => !isSuperOnlyModule(m.key));
 
 /** Never grantable to a client admin, whatever their role. */
 export const SUPER_ONLY = [
-  'Super Admin Control Centre', 'Client admin accounts, roles and permissions', 'Security settings and sessions',
+  'Super Admin Control Centre', 'Document verification', 'OCR and automation', 'Client admin accounts, roles and permissions', 'Security settings and sessions',
   'Integration connections and credentials (including connecting or disconnecting Xero)', 'System monitoring', 'Backup and recovery',
 ];
 
 export type Perms = Partial<Record<ModuleKey, string>>;
 
-/** Normalises a permission set: known modules only, known letters only, in canonical order. */
+/** Normalises a permission set: client-grantable modules only, known letters only, in canonical order. */
 export function cleanPerms(raw: unknown): Perms {
   const out: Perms = {};
   if (!raw || typeof raw !== 'object') return out;
   for (const m of MODULE_KEYS) {
+    if (isSuperOnlyModule(m)) continue;
     const v = (raw as Record<string, unknown>)[m];
     if (typeof v !== 'string') continue;
     let letters = ACTIONS.map(a => a.letter).filter(l => v.includes(l)).join('');
@@ -62,6 +68,7 @@ export function cleanPerms(raw: unknown): Perms {
 }
 
 export function allows(perms: Perms | null | undefined, module: ModuleKey, action: Action): boolean {
+  if (isSuperOnlyModule(module)) return false; // never through a client permission, even if stored earlier
   return !!perms?.[module]?.includes(ACTION_LETTER[action]);
 }
 
@@ -79,20 +86,20 @@ export interface RoleTemplate { id: string; name: string; description: string; p
 /** Starting roles. Cybria can edit them and create others; they are examples, not fixed rules. */
 export const BUILT_IN_ROLES: RoleTemplate[] = [
   { id: 'client_main_admin', name: 'Client Main Admin', description: 'Runs day-to-day operations. No commission, settings or tools unless Cybria adds them.',
-    perms: { ...fill(WORK + 'd', ['learners', 'instructors', 'bookings', 'scheduling']), ...fill(WORK, ['finance', 'wallet', 'invoices', 'documents', 'reviews']), reports: 'vx', ocr: 'v', notifications: 'v', xero: 'v' } },
+    perms: { ...fill(WORK + 'd', ['learners', 'instructors', 'bookings', 'scheduling']), ...fill(WORK, ['finance', 'wallet', 'invoices', 'reviews']), reports: 'vx', notifications: 'v', xero: 'v' } },
   { id: 'operations_manager', name: 'Operations Manager', description: 'Learners, instructors, bookings and scheduling.',
-    perms: { ...fill(WORK, ['learners', 'instructors', 'bookings', 'scheduling']), documents: 'v', reports: 'vx' } },
+    perms: { ...fill(WORK, ['learners', 'instructors', 'bookings', 'scheduling']), reports: 'vx' } },
   { id: 'finance_manager', name: 'Finance Manager', description: 'Finance, wallets, invoices and refunds.',
     perms: { ...fill(WORK, ['finance', 'wallet', 'invoices']), learners: 'v', reports: 'vx', xero: 'v' } },
-  { id: 'instructor_manager', name: 'Instructor Manager', description: 'Instructor accounts, approvals, documents and calendars.',
-    perms: { instructors: WORK, documents: 'vear', scheduling: 've', bookings: 'v', reports: 'v' } },
+  { id: 'instructor_manager', name: 'Instructor Manager', description: 'Instructor accounts, approvals and calendars.',
+    perms: { instructors: WORK, scheduling: 've', bookings: 'v', reports: 'v' } },
   { id: 'learner_support', name: 'Learner Support', description: 'Help learners with accounts, bookings and wallets (view only for money).',
     perms: { learners: 've', bookings: 've', wallet: 'v', invoices: 'v' } },
-  { id: 'document_officer', name: 'Document Verification Officer', description: 'Checks and decides instructor documents.',
-    perms: { documents: 'vear', instructors: 'v', ocr: 'v' } },
   { id: 'read_only_auditor', name: 'Read-Only Auditor', description: 'Can see and export everything a client admin can, but change nothing.',
-    perms: fill('vx', MODULE_KEYS.filter(m => m !== 'settings' && m !== 'tools')) },
+    perms: fill('vx', CLIENT_MODULES.map(m => m.key).filter(m => m !== 'settings' && m !== 'tools')) },
 ];
+/** Built-in roles retired by later changes (kept in history; can no longer be assigned). */
+export const RETIRED_ROLES = ['document_officer'];
 
 export type AdminStatus = 'active' | 'suspended' | 'deactivated';
 export const ADMIN_STATUS: Record<AdminStatus, { label: string; tone: 'green' | 'amber' | 'slate' }> = {

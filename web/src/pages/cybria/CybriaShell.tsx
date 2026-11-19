@@ -9,6 +9,7 @@ import {
 import { useState, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthProvider';
+import { NotificationBell } from '@/components/AppShell';
 import { Button, Input, PageLoader, cx } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { auth } from '@/lib/firebase';
@@ -82,6 +83,8 @@ export function CybriaShell() {
             <option value="">Go to…</option>
             {CYBRIA_NAV.flatMap(g => g.items).map(i => <option key={i.to} value={i.to}>{i.label}</option>)}
           </select>
+          {/* Cybria-only alerts: document verification, OCR and automation. */}
+          <NotificationBell userId="cybria" />
           <span className="hidden text-xs text-ink-500 sm:inline">{user?.email}</span>
         </header>
         <main className="mx-auto max-w-7xl p-4 md:p-8"><Outlet /></main>

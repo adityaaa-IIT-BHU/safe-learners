@@ -6,30 +6,7 @@ import { Link } from 'react-router-dom';
 import { Badge, Button, Card, Input, PageHeader, Select, cx, formatMoney } from '@/components/ui';
 import { api, errorMessage, type SuperDashboard } from '@/lib/api';
 
-type Preset = 'today' | 'yesterday' | '7d' | '30d' | 'month' | 'prevMonth' | 'custom';
-const TZ = 'Australia/Sydney';
-/** Midnight in Sydney for a YYYY-MM-DD day, as a Date. */
-function sydneyMidnight(day: string): Date {
-  const probe = new Date(`${day}T12:00:00Z`);
-  const offset = new Intl.DateTimeFormat('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' }).formatToParts(probe).find(p => p.type === 'timeZoneName')!.value;
-  const hours = Number(offset.replace('GMT', '')) || 10;
-  return new Date(Date.parse(`${day}T00:00:00Z`) - hours * 3_600_000);
-}
-const dayOf = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
-const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-
-export function rangeFor(p: Preset, custom: { from: string; to: string }): { from: string; to: string; label: string } {
-  const today = dayOf(new Date());
-  const [y, m] = today.split('-').map(Number);
-  const first = `${y}-${String(m).padStart(2, '0')}-01`;
-  const prevFirst = m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`;
-  const r = {
-    today: [today, addDays(today, 1), 'Today'], yesterday: [addDays(today, -1), today, 'Yesterday'], '7d': [addDays(today, -6), addDays(today, 1), 'Last 7 days'],
-    '30d': [addDays(today, -29), addDays(today, 1), 'Last 30 days'], month: [first, addDays(today, 1), 'This month'], prevMonth: [prevFirst, first, 'Previous month'],
-    custom: [custom.from, addDays(custom.to, 1), 'Custom range'],
-  }[p] as [string, string, string];
-  return { from: sydneyMidnight(r[0]).toISOString(), to: sydneyMidnight(r[1]).toISOString(), label: r[2] };
-}
+import { addDays, dayOf, rangeFor, type Preset } from '@/lib/dateRange';
 
 function Stat({ label, value, to, tone, sub }: { label: string; value: ReactNode; to: string; tone?: 'warn' | 'bad'; sub?: string }) {
   return (
@@ -100,10 +77,10 @@ export function CybriaDashboard() {
           <Stat label="Financial adjustments (period)" value={n(d?.finance.adjustments)} sub={d ? formatMoney(d.finance.adjustmentAmount) : undefined} to="/admin/finance?tab=transactions" />
         </Group>
         <Group title="Documents and notifications" icon={<BadgeCheck className="size-4" />}>
-          <Stat label="Documents awaiting verification" value={n(d?.documents.awaiting)} tone={d?.documents.awaiting ? 'warn' : undefined} to="/admin/verifications?tab=documents" />
-          <Stat label="Documents expiring soon" value={n(d?.documents.expiringSoon)} tone={d?.documents.expiringSoon ? 'warn' : undefined} to="/admin/verifications?tab=compliance" />
-          <Stat label="Expired documents" value={n(d?.documents.expired)} tone={d?.documents.expired ? 'bad' : undefined} to="/admin/verifications?tab=compliance" />
-          <Stat label="Reminder emails (period)" value={n(d?.notifications.total)} sub={d ? (d.notifications.emailConfigured ? `${d.notifications.sent} sent · ${d.notifications.failed} failed` : 'Email service not set up: recorded, not sent') : undefined} to="/admin/verifications?tab=compliance" />
+          <Stat label="Documents awaiting verification" value={n(d?.documents.awaiting)} tone={d?.documents.awaiting ? 'warn' : undefined} to="/cybria/documents?tab=documents" />
+          <Stat label="Documents expiring soon" value={n(d?.documents.expiringSoon)} tone={d?.documents.expiringSoon ? 'warn' : undefined} to="/cybria/documents?tab=compliance" />
+          <Stat label="Expired documents" value={n(d?.documents.expired)} tone={d?.documents.expired ? 'bad' : undefined} to="/cybria/documents?tab=compliance" />
+          <Stat label="Reminder emails (period)" value={n(d?.notifications.total)} sub={d ? (d.notifications.emailConfigured ? `${d.notifications.sent} sent · ${d.notifications.failed} failed` : 'Email service not set up: recorded, not sent') : undefined} to="/cybria/documents?tab=compliance" />
         </Group>
         <Group title="Integrations and alerts" icon={<Plug className="size-4" />}>
           <Stat label="Xero" value={d ? (d.integrations.xero.connected ? 'Connected' : 'Not connected') : '…'} sub={d?.integrations.xero.organisation ? `${d.integrations.xero.organisation}${d.integrations.xero.demo ? ' (Demo)' : ''}` : undefined} to="/cybria/xero" />

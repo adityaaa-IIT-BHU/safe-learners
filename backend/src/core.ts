@@ -4,7 +4,7 @@ import { FieldValue, Timestamp, getFirestore, type DocumentSnapshot, type Transa
 import { HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions/v2';
 import { dayKey } from '../../shared/time';
-import { MODULES, allows, type Action, type ModuleKey, type Perms } from '../../shared/access';
+import { MODULES, allows, isSuperOnlyModule, type Action, type ModuleKey, type Perms } from '../../shared/access';
 import {
   formatBookingRef,
   normaliseBooking,
@@ -114,6 +114,7 @@ export async function requireAnyAdmin(req: CallableRequest): Promise<string> {
 export async function requirePermission(req: CallableRequest, module: ModuleKey, action: Action): Promise<string> {
   const uid = requireAuth(req);
   if (isSuper(req)) return uid;
+  if (isSuperOnlyModule(module)) throw new HttpsError('permission-denied', 'Cybria Super Admin only.');
   const acct = req.auth!.token.admin === true ? await adminAccountOf(uid) : null;
   if (!acct || acct.status !== 'active') throw new HttpsError('permission-denied', 'Admins only.');
   if (!allows(acct.perms, module, action)) {
@@ -296,6 +297,11 @@ export async function notify(userId: string | undefined, n: NotificationInput): 
 export async function notifyAdmins(n: NotificationInput): Promise<void> {
   await notify('admin', { ...n, email: false });
   for (const email of adminEmails()) await sendEmail(email, `[Admin] ${n.title}`, `${n.body}\n\n${APP_URL}${n.link ?? ''}`);
+}
+
+/** Notifications for Cybria Super Admins only (document verification, OCR and automation). */
+export async function notifyCybria(n: NotificationInput): Promise<void> {
+  await notify('cybria', { ...n, email: false });
 }
 
 export async function emailFor(userId: string): Promise<string | undefined> {

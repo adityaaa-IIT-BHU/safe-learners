@@ -77,3 +77,4 @@ export {
   xeroSyncWorker,
 } from './xero';
 export { addAdminNote, adminPasswordLink, createClientAdmin, deleteAdminRole, ensureAdminRoles, recordAdminLogin, revokeAdminSessions, saveAdminRole, setClientAdminAccess, setClientAdminStatus, superDashboard, updateClientAdmin } from './admins';
+export { adminDashboard } from './adminDashboard';

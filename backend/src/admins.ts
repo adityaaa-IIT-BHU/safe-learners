@@ -3,7 +3,7 @@
 // own admin login. Super Admins themselves are set only in server configuration (SUPER_ADMIN_*).
 import { randomUUID } from 'node:crypto';
 import { onCall, type CallableRequest } from 'firebase-functions/v2/https';
-import { BUILT_IN_ROLES, cleanPerms, type AdminStatus, type Perms } from '../../shared/access';
+import { BUILT_IN_ROLES, RETIRED_ROLES, cleanPerms, type AdminStatus, type Perms } from '../../shared/access';
 import { APP_URL, FieldValue, Timestamp, auth, db, fail, forgetAdminAccount, isAdminAccount, isSuper, isSuperAccount, logger, requireAuth, requireSuperAdmin, userFrom } from './core';
 
 const opts = { region: 'australia-southeast1', cors: true };
@@ -33,11 +33,24 @@ export async function adminAudit(req: CallableRequest | null, e: { action: strin
 
 /** Built-in role templates are created on first use; Cybria can edit them afterwards. */
 async function ensureRoles() {
-  const snap = await db.collection('adminRoles').limit(1).get();
-  if (!snap.empty) return;
-  const batch = db.batch();
-  for (const r of BUILT_IN_ROLES) batch.set(roleRef(r.id), { name: r.name, description: r.description, perms: r.perms, builtIn: true, createdAt: FieldValue.serverTimestamp() });
-  await batch.commit();
+  const snap = await db.collection('adminRoles').get();
+  if (snap.empty) {
+    const batch = db.batch();
+    for (const r of BUILT_IN_ROLES) batch.set(roleRef(r.id), { name: r.name, description: r.description, perms: r.perms, builtIn: true, createdAt: FieldValue.serverTimestamp() });
+    await batch.commit();
+    return;
+  }
+  // Document Verification and OCR became Cybria Super Admin only: take them out of saved roles (other
+  // edits are kept) and retire roles that existed only for them. Runs once; nothing is deleted.
+  for (const d of snap.docs) {
+    const r = d.data();
+    const cleaned = cleanPerms(r.perms);
+    const retire = RETIRED_ROLES.includes(d.id) && r.retired !== true;
+    if (!retire && JSON.stringify(cleaned) === JSON.stringify(r.perms ?? {})) continue;
+    await d.ref.update({ perms: cleaned, ...(retire ? { retired: true } : {}), updatedAt: FieldValue.serverTimestamp() });
+    await adminAudit(null, { action: 'role_changed', targetName: r.name, before: { perms: r.perms ?? {} }, after: { perms: cleaned, ...(retire ? { retired: true } : {}) },
+      reason: 'Document verification and OCR moved to Cybria Super Admin only' });
+  }
 }
 
 // ---------- Claims ----------
@@ -82,7 +95,7 @@ export const createClientAdmin = onCall(opts, async req => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('Enter a valid email address.', 'invalid-argument');
   if (!firstName) fail('Enter the administrator’s first name.', 'invalid-argument');
   const role = (await roleRef(roleId).get()).data();
-  if (!role) fail('Choose a role.', 'invalid-argument');
+  if (!role || role.retired) fail('Choose a role.', 'invalid-argument');
   let user = await auth.getUserByEmail(email).catch(() => null);
   if (user) {
     const existing = userFrom(await db.doc(`users/${user.uid}`).get());
@@ -143,9 +156,11 @@ export const setClientAdminAccess = onCall(opts, async req => {
   const acct = (await acctRef(uid).get()).data();
   if (!acct) fail('Administrator not found.', 'not-found');
   let roleId: string = acct!.roleId, roleName: string = acct!.roleName, perms: Perms, customised = false;
-  if (req.data?.roleId && req.data.roleId !== acct!.roleId) {
+  // A role given on its own (even the current one) applies that role's permissions, which also resets
+  // an individually adjusted administrator back to their role.
+  if (req.data?.roleId && (req.data.roleId !== acct!.roleId || !req.data?.perms)) {
     const role = (await roleRef(String(req.data.roleId)).get()).data();
-    if (!role) fail('Role not found.', 'not-found');
+    if (!role || role.retired) fail('Role not found.', 'not-found');
     roleId = String(req.data.roleId); roleName = role!.name; perms = cleanPerms(role!.perms);
   } else perms = cleanPerms(acct!.perms);
   if (req.data?.perms) {
@@ -324,7 +339,7 @@ export const superDashboard = onCall({ ...opts, timeoutSeconds: 120, memory: '51
       walletTotal, paymentsRecorded: sum(['credit_purchase']), outstanding: money(outstanding.reduce((s, i) => s + Number(i.amountDue), 0)), outstandingCount: outstanding.length,
       commission: money(counted.reduce((s, l) => s + Number(l.commission ?? 0), 0)), earnings: money(counted.reduce((s, l) => s + Number(l.earnings ?? 0), 0)),
       pendingRefunds: refundSnap.size, pendingRefundAmount: money(refundSnap.docs.reduce((s, d) => s + Number(d.data().amount ?? 0), 0)),
-      adjustments: tx.filter(t => ['goodwill_credit', 'correction_credit', 'correction_debit', 'promotional_credit'].includes(t.type)).length, adjustmentAmount: sum(['goodwill_credit', 'correction_credit', 'correction_debit', 'promotional_credit']),
+      adjustments: tx.filter(t => ['goodwill_credit', 'correction_credit', 'debit_adjustment', 'promo_credit'].includes(t.type)).length, adjustmentAmount: sum(['goodwill_credit', 'correction_credit', 'debit_adjustment', 'promo_credit']),
       financeEnabled: fin.enabled === true,
     },
     documents: { awaiting: docsQueue, expiringSoon: docsSoon, expired: docsExpired },

@@ -1,7 +1,7 @@
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ArrowLeft, Eye, Search, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { fullName, pricingOf, type Role } from '@shared/domain';
 import { CREDIT_CATEGORIES, PAYMENT_METHODS, type CreditCategory, type PaymentMethod } from '@shared/finance';
@@ -17,16 +17,20 @@ import { useAllUsers } from './Overview';
 
 export function AdminUsers() {
   const { data: users } = useAllUsers();
-  const [search, setSearch] = useState('');
-  const [role, setRole] = useState<'all' | Role>('all');
+  // Filters can arrive in the link (for example from the dashboard): role, status (active, disabled, pending) and q.
+  const [params, setParams] = useSearchParams();
+  const [search, setSearch] = useState(() => params.get('q') ?? '');
+  const [role, setRole] = useState<'all' | Role>(() => (params.get('role') as Role) || 'all');
+  const statusF = params.get('status');
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users
       .filter(u => u.status !== 'claimed')
       .filter(u => role === 'all' || u.role === role)
+      .filter(u => !statusF || (statusF === 'disabled' ? u.accountStatus === 'disabled' : statusF === 'active' ? u.accountStatus !== 'disabled' && (u.role !== 'instructor' || u.verificationStatus === 'verified') : statusF === 'pending' ? u.verificationStatus === 'pending_review' : true))
       .filter(u => !q || [fullName(u), u.email, u.inviteEmail, u.mobile].some(v => v?.toLowerCase().includes(q)))
       .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-  }, [users, search, role]);
+  }, [users, search, role, statusF]);
 
   return (
     <>
@@ -43,6 +47,12 @@ export function AdminUsers() {
           <option value="admin">Admins</option>
         </Select>
       </Card>
+      {statusF && (
+        <p className="mb-3 flex items-center gap-2 text-sm">
+          <Badge tone="blue">{statusF === 'disabled' ? 'Suspended accounts' : statusF === 'pending' ? 'Awaiting approval' : 'Active accounts'}</Badge>
+          <Button size="sm" variant="ghost" onClick={() => { params.delete('status'); setParams(params); }}>Show all</Button>
+        </p>
+      )}
       <Card className="divide-y divide-ink-100 dark:divide-ink-800">
         {filtered.length === 0 && <EmptyState title="No users match" />}
         {filtered.map(u => (

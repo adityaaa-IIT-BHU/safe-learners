@@ -19,7 +19,8 @@ service cloud.firestore {
         && adminAcct().status == 'active';
     }
     function anyAdmin() { return isSuper() || activeClientAdmin(); }
-    function can(m, a) { return isSuper() || (activeClientAdmin() && adminAcct().perms.get(m, '').matches('.*' + a + '.*')); }
+    // Document Verification and OCR are Cybria Super Admin only: never through a client permission.
+    function can(m, a) { return isSuper() || (!(m in ['documents', 'ocr']) && activeClientAdmin() && adminAcct().perms.get(m, '').matches('.*' + a + '.*')); }
     // Admin access to a user's records follows their role (learner or instructor module).
     function canUser(uid, a) {
       let role = get(/databases/$(database)/documents/users/$(uid)).data.get('role', '');
@@ -132,10 +133,10 @@ service cloud.firestore {
 
     match /notifications/{id} {
       allow read: if signedIn() && (
-        resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin())
+        resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin()) || (resource.data.userId == 'cybria' && isSuper())
       );
       allow update: if signedIn()
-        && (resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin()))
+        && (resource.data.userId == request.auth.uid || (resource.data.userId == 'admin' && anyAdmin()) || (resource.data.userId == 'cybria' && isSuper()))
         && changedOnly(['read']);
       allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
@@ -235,6 +236,16 @@ service cloud.firestore {
     // admin audit trail and login history. A client admin can read only their own account record.
     match /adminAccounts/{uid} {
       allow read: if isSuper() || isSelf(uid);
+    }
+    // Each administrator's own dashboard layout (order and hidden sections only; it never grants access).
+    match /adminPrefs/{uid} {
+      allow read: if isSelf(uid) && anyAdmin();
+      allow create, update: if isSelf(uid) && anyAdmin()
+        && request.resource.data.keys().hasOnly(['dashboard', 'updatedAt'])
+        && request.resource.data.dashboard is map
+        && request.resource.data.dashboard.keys().hasOnly(['order', 'hidden'])
+        && request.resource.data.dashboard.order is list && request.resource.data.dashboard.order.size() <= 20
+        && request.resource.data.dashboard.hidden is list && request.resource.data.dashboard.hidden.size() <= 20;
     }
     match /adminRoles/{id} {
       allow read: if isSuper();

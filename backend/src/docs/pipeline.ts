@@ -28,7 +28,7 @@ import {
 } from '../../../shared/documents';
 import { fullName } from '../../../shared/domain';
 import { dayKey } from '../../../shared/time';
-import { FieldValue, db, logger, notify, userFrom } from '../core';
+import { FieldValue, db, logger, notify, notifyCybria, userFrom } from '../core';
 import { MAX_PDF_PAGES, analyseQr, croppedText, hammingHex, inspectFile, textSimilarity, type FileReport, type QrFinding, type QualityIssue } from './fileChecks';
 import { OcrError, ocrProvider, type OcrRead } from './ocrProvider';
 import {
@@ -63,7 +63,7 @@ export interface DuplicateHit {
 }
 
 function notifyAdmins(title: string, body: string, link: string) {
-  return notify('admin', { type: 'document_review', title, body, link, email: false });
+  return notifyCybria({ type: 'document_review', title, body, link });
 }
 
 async function download(path: string): Promise<Buffer> {
@@ -198,7 +198,7 @@ export async function processJob(id: string, opts: { manual?: boolean; fresh?: b
         const notice = (await flag.get()).data();
         if (notice?.month !== new Date().toISOString().slice(0, 7)) {
           await flag.set({ month: new Date().toISOString().slice(0, 7) });
-          await notifyAdmins('OCR monthly limit reached', `Automatic OCR is waiting: ${used} of ${settings.monthlyPageLimit} pages used this month. Raise the limit or review documents manually.`, '/admin/settings');
+          await notifyAdmins('OCR monthly limit reached', `Automatic OCR is waiting: ${used} of ${settings.monthlyPageLimit} pages used this month. Raise the limit or review documents manually.`, '/cybria/ocr');
         }
         await wait(id, docId, n, 'awaiting_ocr', 'limit', 'Monthly OCR page limit reached');
         return 'waiting';
@@ -222,7 +222,7 @@ export async function processJob(id: string, opts: { manual?: boolean; fresh?: b
       await jobRef(id).update({ status: 'failed', attempts, lastError: e.message, leaseUntil: 0, waitingFor: null, updatedAt: FieldValue.serverTimestamp() });
       await setVersionStatus(docId, n, 'processing_failed', { 'processing.lastError': e.message, 'processing.attempts': attempts, quality: { issues: quality, checkedAt: FieldValue.serverTimestamp() } });
       await reviewRef(docId, n).set({ duplicates, qr, software, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-      await notifyAdmins('Document processing failed', `${parent.instructorName ?? 'An instructor'}'s ${docTypeLabel(type).toLowerCase()} could not be read automatically. Review it manually or retry.`, `/admin/verifications?tab=documents&doc=${docId}&v=${n}`);
+      await notifyAdmins('Document processing failed', `${parent.instructorName ?? 'An instructor'}'s ${docTypeLabel(type).toLowerCase()} could not be read automatically. Review it manually or retry.`, `/cybria/documents?tab=documents&doc=${docId}&v=${n}`);
       return 'failed';
     }
     await recordOcrUsage(ocr.pages, false);
@@ -376,7 +376,7 @@ export async function processJob(id: string, opts: { manual?: boolean; fresh?: b
       await notify(uid, { type: 'document_review', title: `${docTypeLabel(type)}: please check your upload`, body: 'Document Quality Issue – Please upload a clearer image or complete document.', link: `/instructor/verification?doc=${type}`, email: false });
     }
     await notifyAdmins(status === 'manual_verification' ? 'Document needs manual verification' : 'Document ready to verify',
-      `${parent.instructorName ?? 'An instructor'} — ${docTypeLabel(type)}${reasons.length ? `: ${reasons[0]}` : ''}`, `/admin/verifications?tab=documents&doc=${docId}&v=${n}`);
+      `${parent.instructorName ?? 'An instructor'} — ${docTypeLabel(type)}${reasons.length ? `: ${reasons[0]}` : ''}`, `/cybria/documents?tab=documents&doc=${docId}&v=${n}`);
     return 'done';
   } catch (err) {
     logger.error('document processing failed', { job: id, error: err instanceof Error ? err.message : String(err) });

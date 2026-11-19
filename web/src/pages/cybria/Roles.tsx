@@ -17,7 +17,7 @@ export function Roles() {
   const { data: accounts } = useQuery(query(collection(db, 'adminAccounts')), (id, d) => ({ id, roleId: d.roleId as string }), 'cybria:accountRoles');
   const audit = useQuery(query(collection(db, 'adminAudit'), orderBy('atMs', 'desc'), limit(100)), (id, d) => ({ id, ...d } as Record<string, any>), 'cybria:roleAudit').data.filter(a => a.action.startsWith('role_'));
   const [edit, setEdit] = useState<Role | null>(null);
-  useEffect(() => { if (!roles.length) api.ensureAdminRoles({}).catch(() => undefined); }, [roles.length]);
+  useEffect(() => { api.ensureAdminRoles({}).catch(() => undefined); }, []);
   const users = (id: string) => accounts.filter(a => a.roleId === id).length;
   return (
     <>

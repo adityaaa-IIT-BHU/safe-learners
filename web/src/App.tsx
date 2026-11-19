@@ -61,6 +61,7 @@ const AdminTools = page(() => import('@/pages/admin/Tools'), 'AdminTools');
 const AdminXero = page(() => import('@/pages/admin/Xero'), 'AdminXero');
 const AdminFinance = page(() => import('@/pages/admin/Finance'), 'AdminFinance');
 const AdminSettings = page(() => import('@/pages/admin/Settings'), 'AdminSettings');
+const OcrAutomationSettings = page(() => import('@/pages/admin/Settings'), 'OcrAutomationSettings');
 const CybriaShell = page(() => import('@/pages/cybria/CybriaShell'), 'CybriaShell');
 const CybriaLogin = page(() => import('@/pages/cybria/CybriaShell'), 'CybriaLogin');
 const RequireSuper = page(() => import('@/pages/cybria/CybriaShell'), 'RequireSuper');
@@ -163,8 +164,8 @@ export default function App() {
               <Route path="roles" element={<Roles />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="bookings" element={<AdminBookings />} />
-              <Route path="documents" element={<AdminVerifications />} />
-              <Route path="ocr" element={<AdminSettings />} />
+              <Route path="documents" element={<AdminVerifications cybria />} />
+              <Route path="ocr" element={<OcrAutomationSettings />} />
               <Route path="finance" element={<AdminFinance />} />
               <Route path="commission" element={<CommissionManagement />} />
               <Route path="xero" element={<AdminXero />} />

@@ -5,8 +5,7 @@ import { FlaskConical, Gauge, History, Pause, Play, ScanText, Settings2, ShieldC
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { DOC_TYPES, FEATURE_INFO, isActive, type AutomationFeature, type DocTypeKey, type DocumentSettings } from '@shared/documents';
-import { Badge, Button, Card, CardHeader, Input, Modal, PageHeader, Select, Tabs, Textarea, cx } from '@/components/ui';
-import { useSearchParams } from 'react-router-dom';
+import { Badge, Button, Card, CardHeader, Input, Modal, PageHeader, Select, Textarea, cx } from '@/components/ui';
 import { CommissionManagement } from './CommissionManagement';
 import { api, errorMessage } from '@/lib/api';
 import { toDate, useQuery } from '@/lib/data';
@@ -35,17 +34,22 @@ const IMPACT: Record<string, { pause: string; resume: string }> = {
 };
 const label = (k: string) => (k === 'automation' ? 'Complete document automation' : FEATURE_INFO.find(f => f.key === k)?.label ?? k);
 
+/** Client Admin Panel → Settings. Document verification and OCR settings are in the Cybria Super Admin panel. */
 export function AdminSettings() {
-  const [params, setParams] = useSearchParams();
-  const section = params.get('section') === 'commission' ? 'commission' : 'documents';
   return (
     <>
-      <PageHeader title="Settings" subtitle={section === 'commission' ? 'Commission Management' : 'Document Verification Settings'} />
-      <Tabs value={section} onChange={v => setParams({ section: v })} tabs={[
-        { value: 'documents', label: 'Document verification' },
-        { value: 'commission', label: 'Commission management' },
-      ]} />
-      <div className="mt-4">{section === 'commission' ? <CommissionManagement /> : <DocumentVerificationSettings />}</div>
+      <PageHeader title="Settings" subtitle="Commission Management: default and introductory commission, individual instructor rates and history (as your access allows)." />
+      <CommissionManagement />
+    </>
+  );
+}
+
+/** Cybria Super Admin → OCR & Automation (document verification settings). */
+export function OcrAutomationSettings() {
+  return (
+    <>
+      <PageHeader title="OCR & Automation" subtitle="Document verification settings: automation switches, test mode, OCR usage and mandatory documents." />
+      <DocumentVerificationSettings />
     </>
   );
 }

@@ -23,7 +23,7 @@ import {
 } from '../../../shared/documents';
 import { fullName, legacyVerificationDocs, normaliseExpiry } from '../../../shared/domain';
 import { DEFAULT_TIMEZONE, dayKey } from '../../../shared/time';
-import { APP_URL, FieldValue, db, deliverEmail, emailFor, logger, notify, userFrom } from '../core';
+import { APP_URL, FieldValue, db, deliverEmail, emailFor, logger, notify, notifyCybria, userFrom } from '../core';
 import { SYSTEM, audit, docRef, getDocumentSettings, type Actor } from './store';
 
 const REGION = 'australia-southeast1';
@@ -82,7 +82,7 @@ export async function recomputeEligibility(uid: string, reason: string, actor: A
     await audit({ action: 'eligibility_changed', actor, instructorId: uid, before: prev ? { eligible: prev.eligible } : null, after: { eligible: c.eligible }, reason, details: { summary: describeCompliance(c) } });
     if (prev && prev.eligible && !c.eligible) {
       await notify(uid, { type: 'document_compliance', title: 'Action needed on your documents', body: `New bookings are paused until this is fixed. ${describeCompliance(c)}.`, link: '/instructor/verification', email: false });
-      await notify('admin', { type: 'document_compliance', title: 'Instructor needs compliance action', body: `${fullName(user)}: ${describeCompliance(c)}`, link: `/admin/verifications?tab=compliance&instructor=${uid}`, email: false });
+      await notifyCybria({ type: 'document_compliance', title: 'Instructor needs compliance action', body: `${fullName(user)}: ${describeCompliance(c)}`, link: `/cybria/documents?tab=compliance&instructor=${uid}` });
     } else if (prev && !prev.eligible && c.eligible) {
       await notify(uid, { type: 'document_compliance', title: 'Your documents are up to date', body: 'All mandatory documents are verified. You can take new bookings.', link: '/instructor/verification', email: false });
     }
@@ -172,7 +172,7 @@ export async function runExpiryMonitor(opts: { now?: Date; force?: boolean } = {
     touched.add(uid);
     await audit({ action: 'expiry_notification_generated', actor: SYSTEM, instructorId: uid, docId: d.id, details: { stage, expiry, daysLeft: days } });
     await notify(uid, { type: 'document_expiry', title: m.title, body: m.instructor.replace(/\n+/g, ' '), link: `/instructor/verification?doc=${x.type}`, email: false });
-    await notify('admin', { type: 'document_expiry', title: `${m.title}: ${fullName(user)}`, body: m.admin, link: `/admin/verifications?tab=compliance&instructor=${uid}`, email: false });
+    await notifyCybria({ type: 'document_expiry', title: `${m.title}: ${fullName(user)}`, body: m.admin, link: `/cybria/documents?tab=compliance&instructor=${uid}` });
     await sendReminderEmail(ledger.id, uid, user.firstName, m.title, m.instructor, x.type);
     res.emailed++;
   }

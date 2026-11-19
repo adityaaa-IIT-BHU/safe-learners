@@ -15,11 +15,20 @@ import { useAllUsers } from './Overview';
 type InstructorTab = 'pending_review' | 'updates' | 'not_submitted' | 'verified' | 'rejected';
 type Tab = 'documents' | 'compliance' | InstructorTab;
 
-export function AdminVerifications() {
+const DOC_TABS: Tab[] = ['documents', 'compliance', 'updates'];
+
+/**
+ * Instructor verification. In the Cybria Super Admin panel (`cybria`) this is the full document
+ * verification workspace: documents, OCR results, compliance and decisions. In the Client Admin Panel
+ * it is Instructor Approvals only (approve or request changes); document checks stay with Cybria and
+ * the server and database rules refuse them for client admins.
+ */
+export function AdminVerifications({ cybria = false }: { cybria?: boolean }) {
   const { data: users } = useAllUsers();
-  const { data: records } = useAllDocuments();
+  const { data: records } = useAllDocuments(cybria);
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'documents';
+  const asked = params.get('tab') as Tab | null;
+  const tab: Tab = asked && (cybria || !DOC_TABS.includes(asked)) ? asked : cybria ? 'documents' : 'pending_review';
   const setTab = (t: Tab) => setParams({ tab: t });
   const instructors = users.filter(u => u.role === 'instructor');
   // "Document updates": verified instructors who sent a renewed document.
@@ -32,13 +41,13 @@ export function AdminVerifications() {
 
   return (
     <>
-      <PageHeader title="Instructor verification" />
-      <AutomationStrip />
+      <PageHeader title={cybria ? 'Document Verification' : 'Instructor Approvals'}
+        subtitle={cybria ? undefined : 'Approve instructors or ask them for changes. Instructor documents are checked by Cybria.'} />
+      {cybria && <AutomationStrip />}
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'documents', label: 'Documents', count: queue },
-        { value: 'compliance', label: 'Compliance' },
+        ...(cybria ? [{ value: 'documents' as Tab, label: 'Documents', count: queue }, { value: 'compliance' as Tab, label: 'Compliance' }] : []),
         { value: 'pending_review', label: 'Awaiting review', count: count('pending_review') },
-        { value: 'updates', label: 'Document updates', count: count('updates') },
+        ...(cybria ? [{ value: 'updates' as Tab, label: 'Document updates', count: count('updates') }] : []),
         { value: 'not_submitted', label: 'Not submitted', count: count('not_submitted') },
         { value: 'rejected', label: 'Needs changes', count: count('rejected') },
         { value: 'verified', label: 'Verified', count: count('verified') },
@@ -47,13 +56,13 @@ export function AdminVerifications() {
         {tab === 'documents' ? <DocumentsTab />
           : tab === 'compliance' ? <ComplianceTab users={users} />
           : list.length === 0 ? <Card><EmptyState icon={<ShieldCheck className="size-6" />} title="Nothing here" /></Card>
-          : list.map(u => <InstructorReview key={u.id} instructor={u} records={records.filter(r => r.instructorId === u.id)} />)}
+          : list.map(u => <InstructorReview key={u.id} instructor={u} records={records.filter(r => r.instructorId === u.id)} cybria={cybria} />)}
       </div>
     </>
   );
 }
 
-function InstructorReview({ instructor, records }: { instructor: UserProfile; records: DocRecord[] }) {
+function InstructorReview({ instructor, records, cybria }: { instructor: UserProfile; records: DocRecord[]; cybria: boolean }) {
   const { data: priv } = useDoc(doc(db, 'users', instructor.id, 'private', 'profile'), (_, d) => d as Record<string, any>);
   const docs = (priv?.verification ?? {}) as Record<string, VerificationDocument>;
   const legacy = legacyVerificationDocs(priv?.legacy);
@@ -87,7 +96,18 @@ function InstructorReview({ instructor, records }: { instructor: UserProfile; re
           </div>
         ) : <Badge tone="green">Verified</Badge>}
       />
-      <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+      {!cybria ? (
+        <div className="p-5">
+          <div className="flex flex-wrap gap-2">
+            {VERIFICATION_STEPS.map(s => (
+              <span key={s.key} className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-1.5 text-sm dark:border-ink-700">
+                {s.label}{docFor(s.key)?.url || docFor(s.key)?.path ? <ReviewBadge status={instructor.documentReviews?.[s.key]?.status ?? 'submitted'} /> : <Badge>Not provided</Badge>}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-ink-500">Document checks (files, OCR results, expiry) are handled by Cybria.</p>
+        </div>
+      ) : <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
         {VERIFICATION_STEPS.map(s => {
           const d = docFor(s.key);
           const expired = isExpired(d?.expiry);
@@ -98,7 +118,7 @@ function InstructorReview({ instructor, records }: { instructor: UserProfile; re
               <div key={s.key} className="rounded-xl border border-ink-200 p-3 text-sm dark:border-ink-700">
                 <p className="flex items-center justify-between gap-2 font-semibold">{s.label}<DocStatusBadge status={recordStatus(rec)} /></p>
                 <p className="mt-1 text-ink-500">Version {rec.latestVersion}{rec.verifiedExpiry ? ` · verified expiry ${rec.verifiedExpiry.split('-').reverse().join('/')}` : d?.expiry ? ` · typed expiry ${normaliseExpiry(d.expiry)?.split('-').reverse().join('/') ?? d.expiry}` : ''}</p>
-                <Link to={`/admin/verifications?tab=documents&doc=${rec.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Open document review</Link>
+                <Link to={`/cybria/documents?tab=documents&doc=${rec.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-bold underline"><ExternalLink className="size-3" />Open document review</Link>
               </div>
             );
           }
@@ -121,7 +141,7 @@ function InstructorReview({ instructor, records }: { instructor: UserProfile; re
             </div>
           );
         })}
-      </div>
+      </div>}
       <Modal open={rejectOpen} onClose={() => setRejectOpen(false)} title={`Request changes from ${instructor.firstName}`}
         footer={<Button variant="danger" loading={busy} disabled={!reason.trim()} onClick={() => decide(false)}>Send request</Button>}>
         <Textarea label="What needs fixing?" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. The WWC check photo is blurry — please upload a clearer copy." />
@@ -134,6 +154,7 @@ function ReviewBadge({ status }: { status?: string }) {
   if (status === 'pending') return <Badge tone="amber">To review</Badge>;
   if (status === 'approved') return <Badge tone="green">Approved</Badge>;
   if (status === 'rejected') return <Badge tone="red">Rejected</Badge>;
+  if (status === 'submitted') return <Badge>Submitted</Badge>;
   return null;
 }
 

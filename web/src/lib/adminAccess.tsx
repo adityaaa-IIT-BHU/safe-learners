@@ -9,14 +9,14 @@ import { Card, EmptyState } from '@/components/ui';
 
 export const ADMIN_SECTIONS: { path: string; needs: [ModuleKey, Action][] }[] = [
   { path: '/admin', needs: [['reports', 'view']] },
-  { path: '/admin/verifications', needs: [['documents', 'view'], ['instructors', 'view']] },
+  { path: '/admin/verifications', needs: [['instructors', 'view']] },
   { path: '/admin/users', needs: [['learners', 'view'], ['instructors', 'view']] },
   { path: '/admin/bookings', needs: [['bookings', 'view']] },
   { path: '/admin/reviews', needs: [['reviews', 'view']] },
   { path: '/admin/finance', needs: [['finance', 'view'], ['invoices', 'view'], ['wallet', 'view']] },
   { path: '/admin/xero', needs: [['xero', 'view']] },
   { path: '/admin/tools', needs: [['tools', 'view']] },
-  { path: '/admin/settings', needs: [['ocr', 'view'], ['commission', 'view']] },
+  { path: '/admin/settings', needs: [['commission', 'view']] },
 ];
 
 export function useSectionAccess() {

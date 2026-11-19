@@ -4,7 +4,7 @@ import { collection, doc, limit, query, where } from 'firebase/firestore';
 import { Copy, History, KeyRound, LogOut, Plus, ShieldAlert, UserCog } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ADMIN_STATUS, MODULES, cleanPerms, type AdminStatus, type Perms } from '@shared/access';
+import { ADMIN_STATUS, CLIENT_MODULES, cleanPerms, type AdminStatus, type Perms } from '@shared/access';
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Modal, PageHeader, Select, Textarea, cx } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { toDate, useDoc, useQuery } from '@/lib/data';
@@ -17,9 +17,9 @@ export interface AdminAcct {
 }
 export interface Role { id: string; name: string; description?: string; perms: Perms; builtIn?: boolean }
 const mapAcct = (id: string, d: Record<string, any>): AdminAcct => ({ id, ...d, perms: d.perms ?? {}, lastLoginAt: toDate(d.lastLoginAt), createdAt: toDate(d.createdAt) } as AdminAcct);
-export const useRoles = () => useQuery(query(collection(db, 'adminRoles')), (id, d) => ({ id, ...d, perms: d.perms ?? {} } as Role), 'cybria:roles').data;
+export const useRoles = () => useQuery(query(collection(db, 'adminRoles')), (id, d) => (d.retired ? null : { id, ...d, perms: cleanPerms(d.perms) } as Role), 'cybria:roles').data;
 const when = (d?: Date | string | null) => { const x = typeof d === 'string' ? new Date(d) : d; return x ? x.toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' }) : '—'; };
-export const accessSummary = (p: Perms) => { const n = Object.keys(p).length; return n ? `${n} of ${MODULES.length} modules` : 'No access'; };
+export const accessSummary = (p: Perms) => { const n = Object.keys(cleanPerms(p)).length; return n ? `${n} of ${CLIENT_MODULES.length} modules` : 'No access'; };
 
 export function ClientAdmins() {
   const { data: accounts } = useQuery(query(collection(db, 'adminAccounts')), mapAcct, 'cybria:accounts');
@@ -27,7 +27,8 @@ export function ClientAdmins() {
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<'all' | AdminStatus>('all');
-  useEffect(() => { if (!roles.length) api.ensureAdminRoles({}).catch(() => undefined); }, [roles.length]);
+  // Creates the built-in roles on first use and applies any role updates (for example access-model changes).
+  useEffect(() => { api.ensureAdminRoles({}).catch(() => undefined); }, []);
   const shown = accounts.filter(a => filter === 'all' || a.status === filter).sort((a, b) => (a.firstName ?? a.email).localeCompare(b.firstName ?? b.email));
   return (
     <>
@@ -106,7 +107,7 @@ function AdminDetail({ uid, roles, onClose }: { uid: string; roles: Role[]; onCl
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   if (!a) return null;
-  const draft = perms ?? a.perms;
+  const draft = perms ?? cleanPerms(a.perms);
   const role = roles.find(r => r.id === (roleId ?? a.roleId));
   const dirty = roleId !== null || perms !== null;
   const name = [a.firstName, a.surname].filter(Boolean).join(' ') || a.email;

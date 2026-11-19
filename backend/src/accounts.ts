@@ -225,7 +225,7 @@ export const submitVerification = onCall(opts, async req => {
     type: 'verification',
     title: 'Instructor verification submitted',
     body: `${fullName(instructor)} submitted their documents for review.`,
-    link: `/admin/verifications`,
+    link: `/admin/verifications?tab=pending_review`,
   });
   return { ok: true };
 });

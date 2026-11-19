@@ -1,5 +1,5 @@
 // Module × action permission grid used for roles and individual administrators.
-import { ACTIONS, MODULES, SUPER_ONLY, cleanPerms, type Perms } from '@shared/access';
+import { ACTIONS, CLIENT_MODULES, SUPER_ONLY, cleanPerms, type Perms } from '@shared/access';
 import { cx } from '@/components/ui';
 
 export function PermissionMatrix({ value, onChange, readOnly }: { value: Perms; onChange?: (p: Perms) => void; readOnly?: boolean }) {
@@ -23,7 +23,7 @@ export function PermissionMatrix({ value, onChange, readOnly }: { value: Perms; 
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-            {MODULES.map(m => {
+            {CLIENT_MODULES.map(m => {
               const cur = value[m.key] ?? '';
               return (
                 <tr key={m.key} className={cx(cur && 'bg-emerald-50/40 dark:bg-emerald-500/5')}>

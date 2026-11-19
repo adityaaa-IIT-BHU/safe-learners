@@ -178,6 +178,7 @@ export const api = {
   // Cybria Super Admin
   recordAdminLogin: callable<Record<string, never>, { ok: boolean }>('recordAdminLogin'),
   superDashboard: callable<{ from: string; to: string }, SuperDashboard>('superDashboard'),
+  adminDashboard: callable<{ from: string; to: string }, AdminDashboard>('adminDashboard'),
   createClientAdmin: callable<{ email: string; firstName: string; surname: string; roleId: string }, { uid: string; setPasswordLink: string }>('createClientAdmin'),
   updateClientAdmin: callable<{ uid: string; firstName: string; surname: string }, { ok: true }>('updateClientAdmin'),
   setClientAdminStatus: callable<{ uid: string; status: string; reason: string }, { ok: true }>('setClientAdminStatus'),
@@ -189,6 +190,40 @@ export const api = {
   deleteAdminRole: callable<{ id: string; reason: string }, { ok: true }>('deleteAdminRole'),
   ensureAdminRoles: callable<Record<string, never>, { ok: true }>('ensureAdminRoles'),
 };
+
+export interface DashLesson { id: string; ref: string | null; startAt: string; endAt: string; status: string; learnerName: string | null; instructorId: string; instructorName: string | null; ongoing: boolean }
+export interface DashDay { day: string; booked: number; completed: number; cancelled: number; upcoming: number; other: number }
+/** Client Admin dashboard. A section is null when the administrator has no access to it. */
+export interface AdminDashboard {
+  access: Record<'learners' | 'instructors' | 'bookings' | 'finance' | 'invoices' | 'wallet' | 'commission' | 'reports', boolean>;
+  people: {
+    learners: { total: number; active: number; inactive: number; new: number } | null;
+    instructors: { total: number; active: number; suspended: number; new: number; approval: Record<'verified' | 'pending_review' | 'rejected' | 'not_submitted', number> } | null;
+  } | null;
+  lessons: {
+    total: number; inPeriod: number; upcoming: number; completed: number; cancelled: number; pending: number; proposed: number; lateCancel: number;
+    series: DashDay[];
+    today: { lessons: DashLesson[]; scheduled: number; ongoing: number; upcoming: number; completed: number; cancelled: number };
+    conflicts: { instructorId: string; instructorName: string | null; first: DashLesson; second: DashLesson & { kind: string; title: string | null } }[];
+    conflictCount: number;
+    availability: { id: string; name: string; hours: string[]; extraHours: number; lessonsToday: number }[] | null;
+    instructorActivity: { id: string; name: string; lessons: number; completed: number; cancelled: number }[];
+  } | null;
+  finance: {
+    financeEnabled: boolean;
+    payments: number | null;
+    wallet: { credits: number; spent: number; refunded: number } | null;
+    outstanding: { amount: number; count: number } | null;
+    refunds: { awaitingApproval: number; awaitingTransfer: number; amount: number; completed: number } | null;
+    commission: { commission: number; earnings: number; lessons: number } | null;
+    recent: { id: string; at: string; type: string; amount: number; description: string | null }[] | null;
+    issues: { reconciliation: number; sync: number } | null;
+  } | null;
+  pending: { key: string; label: string; count: number; to: string; tone: 'warn' | 'bad' }[];
+  activity: { at: string; kind: string; title: string; detail: string; to: string }[];
+  range: { from: string; to: string };
+  generatedAt: string;
+}
 
 export interface SuperDashboard {
   users: { learners: number; learnersActive: number; learnersInactive: number; instructors: number; instructorsActive: number; instructorsPending: number; instructorsSuspended: number; suspended: number; admins: number; adminsActive: number };

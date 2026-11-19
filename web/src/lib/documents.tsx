@@ -84,8 +84,8 @@ export function useInstructorDocuments(uid: string | null | undefined) {
   return useQuery(uid ? query(collection(db, 'instructorDocuments'), where('instructorId', '==', uid)) : null, mapDocRecord, `docs:${uid}`);
 }
 
-export function useAllDocuments() {
-  return useQuery(query(collection(db, 'instructorDocuments'), limit(2000)), mapDocRecord, 'docs:all');
+export function useAllDocuments(enabled = true) {
+  return useQuery(enabled ? query(collection(db, 'instructorDocuments'), limit(2000)) : null, mapDocRecord, `docs:all:${enabled}`);
 }
 
 export function useVersions(docId: string | null) {
